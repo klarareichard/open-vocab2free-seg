@@ -5,4 +5,5 @@ from . import (
     register_ade20k_847,
     register_pascal_20,
     register_pascal_context,
+    register_acdc
 )

@@ -3,6 +3,34 @@ import os
 from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.data.datasets import load_sem_seg
 
+ACDC_ORDERED_CATEGORIES = \
+['road', 'sidewalk', 'building', 'wall', 'fence', 'pole', 'traffic light', 'traffic sign', 'vegetation', 'terrain', 'sky', 'person', 'rider', 'car', 'truck', 'bus', 'train', 'motorcycle', 'bicycle']
+
+
+ACDC_CATEGORIES = \
+[
+    #       name                     id    trainId   category            catId     hasInstances   ignoreInEval   color
+    {'name': 'road'                 , 'id':  7 , 'color' : (128, 64,128) },
+    {'name': 'sidewalk'             , 'id':  8 , 'color' : (244, 35,232) },
+    {'name': 'building'             , 'id': 11 ,  'color' : ( 70, 70, 70) },
+    {'name': 'wall'                 , 'id': 12 ,  'color' : (102,102,156) },
+    {'name': 'fence'                , 'id': 13 ,  'color' : (190,153,153) },
+    {'name': 'pole'                 , 'id': 17 ,  'color' : (153,153,153) },
+    {'name': 'traffic light'        , 'id': 19 ,  'color' : (250,170, 30) },
+    {'name': 'traffic sign'         , 'id': 20 ,  'color' : (220,220,  0) },
+    {'name': 'vegetation'           , 'id': 21 ,  'color' : (107,142, 35) },
+    {'name': 'terrain'              , 'id': 22 ,  'color' : (152,251,152) },
+    {'name': 'sky'                  , 'id': 23 ,  'color' : ( 70,130,180) },
+    {'name': 'person'               , 'id': 24 ,  'color' : (220, 20, 60) },
+    {'name': 'rider'                , 'id': 25 ,  'color' : (255,  0,  0) },
+    {'name': 'car'                  , 'id': 26 ,  'color' : (  0,  0,142) },
+    {'name': 'truck'                , 'id': 27 ,  'color' : (  0,  0, 70) },
+    {'name': 'bus'                  , 'id': 28 ,  'color' : (  0, 60,100) },
+    {'name': 'train'                , 'id': 31 ,  'color' : (  0, 80,100) },
+    {'name': 'motorcycle'           , 'id': 32 ,  'color' : (  0,  0,230) },
+    {'name': 'bicycle'              , 'id': 33 ,  'color' : (119, 11, 32) }
+]
+
 COCO_CATEGORIES = [
     {"color": [220, 20, 60], "isthing": 1, "id": 1, "name": "person"},
     {"color": [119, 11, 32], "isthing": 1, "id": 2, "name": "bicycle"},
@@ -178,42 +206,52 @@ COCO_CATEGORIES = [
 ]
 
 
-def _get_coco_stuff_meta():
-    stuff_ids = [k["id"] for k in COCO_CATEGORIES]
-    assert len(stuff_ids) == 171, len(stuff_ids)
+def _get_acdc_stuff_meta():
+    stuff_ids = [k["id"] for k in ACDC_CATEGORIES]
+    assert len(stuff_ids) == 19, len(stuff_ids)
 
     stuff_dataset_id_to_contiguous_id = {k: i for i, k in enumerate(stuff_ids)}
-    stuff_classes = [k["name"] for k in COCO_CATEGORIES]
-    extra_classes = []
+    stuff_classes = ACDC_ORDERED_CATEGORIES
 
     ret = {
         "stuff_dataset_id_to_contiguous_id": stuff_dataset_id_to_contiguous_id,
-        "stuff_classes": stuff_classes,
-        "val_extra_classes": extra_classes
+        "stuff_classes": stuff_classes
     }
     return ret
 
-def register_all_coco_stuff_10k(root):
-    root = os.path.join(root, "coco-stuff")
-    meta = _get_coco_stuff_meta()
+
+def register_all_acdc(root):
+    root = os.path.join(root, "acdc")
+    meta = _get_acdc_stuff_meta()
+    extra_classes = []
+    for category in meta["stuff_classes"]:
+        seen = False
+        for entry in COCO_CATEGORIES:
+            if category == entry["name"]:
+                seen = True
+        if not seen:
+            extra_classes.append(category)
+    meta.update({"val_extra_classes": extra_classes})
+    print("meta")
+    print(meta)
     for name, image_dirname, sem_seg_dirname in [
-        ("train", "images/train2017", "annotations_detectron2/train2017"),
-        ("test", "images/val2017", "annotations_detectron2/val2017"),
+        ("train", "images/train", "annotations_detectron2/train"),
+        ("test", "images/val", "annotations_detectron2/val"),
     ]:
         image_dir = os.path.join(root, image_dirname)
         gt_dir = os.path.join(root, sem_seg_dirname)
-        name = f"coco_2017_{name}_stuff_all_sem_seg"
+        name = f"acdc_{name}_stuff_all_sem_seg"
         DatasetCatalog.register(
-            name, lambda x=image_dir, y=gt_dir: load_sem_seg(y, x, gt_ext="png", image_ext="jpg")
+            name, lambda x=image_dir, y=os.path.join(gt_dir,"random"): load_sem_seg(y, x, gt_ext="png", image_ext="png")
         )
         MetadataCatalog.get(name).set(
             image_root=image_dir,
             sem_seg_root=gt_dir,
-            evaluator_type="sem_seg",
+            evaluator_type="cityscapes_sem_seg",
             ignore_label=255,
-            **meta,
+            gt_dir= gt_dir,
+            **meta
         )
 
 _root = os.getenv("DETECTRON2_DATASETS", "datasets")
-print(_root)
-register_all_coco_stuff_10k(_root)
+register_all_acdc(_root)

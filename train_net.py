@@ -18,13 +18,18 @@ from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import get_cfg
 from detectron2.data import MetadataCatalog, build_detection_train_loader
 from detectron2.engine import DefaultTrainer, default_argument_parser, default_setup, launch
-from detectron2.evaluation import CityscapesInstanceEvaluator, CityscapesSemSegEvaluator, \
+from detectron2.evaluation import CityscapesInstanceEvaluator, \
     COCOEvaluator, COCOPanopticEvaluator, DatasetEvaluators, SemSegEvaluator, verify_results, \
     DatasetEvaluator
 
 from detectron2.projects.deeplab import add_deeplab_config, build_lr_scheduler
 from detectron2.solver.build import maybe_add_gradient_clipping
 from detectron2.utils.logger import setup_logger
+from detectron2.engine import HookBase
+from detectron2.engine import hooks
+
+from detectron2.evaluation.sem_seg_evaluation import load_image_into_numpy_array
+
 
 from detectron2.utils.file_io import PathManager
 import numpy as np
@@ -34,11 +39,534 @@ import glob
 import pycocotools.mask as mask_util
 
 from detectron2.data import DatasetCatalog, MetadataCatalog
-from detectron2.utils.comm import all_gather, is_main_process, synchronize
+from detectron2.utils.comm import all_gather, is_main_process, synchronize, get_rank, get_local_size, get_world_size
 import json
 
 # from detectron2.evaluation import SemSegGzeroEvaluator
 # from mask_former.evaluation.sem_seg_evaluation_gzero import SemSegGzeroEvaluator
+
+import tempfile
+
+class SemSegGzeroEvaluator(DatasetEvaluator):
+    """
+    Evaluate semantic segmentation metrics.
+    """
+
+    def __init__(
+        self, dataset_name, distributed, output_dir=None, *, num_classes=None, ignore_label=None
+    ):
+        """
+        Args:
+            dataset_name (str): name of the dataset to be evaluated.
+            distributed (True): if True, will collect results from all ranks for evaluation.
+                Otherwise, will evaluate the results in the current process.
+            output_dir (str): an output directory to dump results.
+            num_classes, ignore_label: deprecated argument
+        """
+        self._logger = logging.getLogger(__name__)
+        if num_classes is not None:
+            self._logger.warn(
+                "SemSegEvaluator(num_classes) is deprecated! It should be obtained from metadata."
+            )
+        if ignore_label is not None:
+            self._logger.warn(
+                "SemSegEvaluator(ignore_label) is deprecated! It should be obtained from metadata."
+            )
+        self._dataset_name = dataset_name
+        self._distributed = distributed
+        self._output_dir = output_dir
+
+        self._cpu_device = torch.device("cpu")
+
+        self.input_file_to_gt_file = {
+            dataset_record["file_name"]: dataset_record["sem_seg_file_name"]
+            for dataset_record in DatasetCatalog.get(dataset_name)
+        }
+
+        meta = MetadataCatalog.get(dataset_name)
+        # Dict that maps contiguous training ids to COCO category ids
+        try:
+            c2d = meta.stuff_dataset_id_to_contiguous_id
+            self._contiguous_id_to_dataset_id = {v: k for k, v in c2d.items()}
+        except AttributeError:
+            self._contiguous_id_to_dataset_id = None
+        self._class_names = meta.stuff_classes
+        self._val_extra_classes = meta.val_extra_classes
+        self._num_classes = len(meta.stuff_classes)
+        if num_classes is not None:
+            assert self._num_classes == num_classes, f"{self._num_classes} != {num_classes}"
+        self._ignore_label = ignore_label if ignore_label is not None else meta.ignore_label
+        self._count = 1
+
+    def reset(self):
+        self._conf_matrix = np.zeros((self._num_classes + 1, self._num_classes + 1), dtype=np.int64)
+        self._predictions = []
+
+    def process(self, inputs, outputs):
+        """
+        Args:
+            inputs: the inputs to a model.
+                It is a list of dicts. Each dict corresponds to an image and
+                contains keys like "height", "width", "file_name".
+            outputs: the outputs of a model. It is either list of semantic segmentation predictions
+                (Tensor [H, W]) or list of dicts with key "sem_seg" that contains semantic
+                segmentation prediction in the same format.
+        """
+        for input, output in zip(inputs, outputs):
+            output = output["sem_seg"].argmax(dim=0).to(self._cpu_device)
+            pred = np.array(output, dtype=np.int)
+            with PathManager.open(self.input_file_to_gt_file[input["file_name"]], "rb") as f:
+                gt = np.array(Image.open(f), dtype=np.int)
+
+            gt[gt == self._ignore_label] = self._num_classes
+            print(self._ignore_label)
+            print("ignore label")
+
+            self._conf_matrix += np.bincount(
+                (self._num_classes + 1) * pred.reshape(-1) + gt.reshape(-1),
+                minlength=self._conf_matrix.size,
+            ).reshape(self._conf_matrix.shape)
+
+            self._predictions.extend(self.encode_json_sem_seg(pred, input["file_name"]))
+
+    def evaluate(self):
+        """
+        Evaluates standard semantic segmentation metrics (http://cocodataset.org/#stuff-eval):
+
+        * Mean intersection-over-union averaged across classes (mIoU)
+        * Frequency Weighted IoU (fwIoU)
+        * Mean pixel accuracy averaged across classes (mACC)
+        * Pixel Accuracy (pACC)
+        """
+        if self._distributed:
+            synchronize()
+            conf_matrix_list = all_gather(self._conf_matrix)
+            self._predictions = all_gather(self._predictions)
+            self._predictions = list(itertools.chain(*self._predictions))
+            if not is_main_process():
+                return
+
+            self._conf_matrix = np.zeros_like(self._conf_matrix)
+            for conf_matrix in conf_matrix_list:
+                self._conf_matrix += conf_matrix
+
+        if self._output_dir:
+            print(f"write sem_seg_predictions.json to {self._output_dir}")
+            PathManager.mkdirs(self._output_dir)
+            file_path = os.path.join(self._output_dir, "sem_seg_predictions.json")
+            with PathManager.open(file_path, "w") as f:
+                f.write(json.dumps(self._predictions))
+
+        acc = np.full(self._num_classes, np.nan, dtype=np.float)
+        iou = np.full(self._num_classes, np.nan, dtype=np.float)
+        tp = self._conf_matrix.diagonal()[:-1].astype(np.float)
+        pos_gt = np.sum(self._conf_matrix[:-1, :-1], axis=0).astype(np.float)
+        class_weights = pos_gt / np.sum(pos_gt)
+        pos_pred = np.sum(self._conf_matrix[:-1, :-1], axis=1).astype(np.float)
+        acc_valid = pos_gt > 0
+        acc[acc_valid] = tp[acc_valid] / pos_gt[acc_valid]
+        iou_valid = (pos_gt + pos_pred) > 0
+        union = pos_gt + pos_pred - tp
+        iou[acc_valid] = tp[acc_valid] / union[acc_valid]
+        macc = np.sum(acc[acc_valid]) / np.sum(acc_valid)
+        miou = np.sum(iou[acc_valid]) / np.sum(iou_valid)
+        fiou = np.sum(iou[acc_valid] * class_weights[acc_valid])
+        pacc = np.sum(tp) / np.sum(pos_gt)
+        seen_IoU = 0
+        unseen_IoU = 0.
+        seen_acc = 0
+        unseen_acc = 0
+        res = {}
+        res["mIoU"] = 100 * miou
+        res["fwIoU"] = 100 * fiou
+        for i, name in enumerate(self._class_names):
+            res["IoU-{}".format(name)] = 100 * iou[i]
+            if name in self._val_extra_classes:
+                unseen_IoU = unseen_IoU + 100 * iou[i]
+            else:
+                seen_IoU = seen_IoU + 100 * iou[i]
+        #unseen_IoU = 0.
+        print(unseen_IoU)
+        if len(self._val_extra_classes) > 0:
+            unseen_IoU = unseen_IoU / len(self._val_extra_classes)
+        seen_IoU = seen_IoU / (self._num_classes - len(self._val_extra_classes))
+        res["mACC"] = 100 * macc
+        res["pACC"] = 100 * pacc
+        for i, name in enumerate(self._class_names):
+            res["ACC-{}".format(name)] = 100 * acc[i]
+            if name in self._val_extra_classes:
+                unseen_acc = unseen_acc + 100 * iou[i]
+            else:
+                seen_acc = seen_acc + 100 * iou[i]
+        unseen_acc = 0.
+        if len(self._val_extra_classes) > 0:
+            unseen_acc = unseen_acc / len(self._val_extra_classes)
+        seen_acc = seen_acc / (self._num_classes - len(self._val_extra_classes))
+        res["seen_IoU"] = seen_IoU
+        res["unseen_IoU"] = unseen_IoU
+        res["harmonic mean"] = 2 * seen_IoU * unseen_IoU / (seen_IoU + unseen_IoU)
+        # res["unseen_acc"] = unseen_acc
+        # res["seen_acc"] = seen_acc
+        if self._output_dir:
+            file_path = os.path.join(self._output_dir, f"sem_seg_evaluation_{self._count}.pth")
+            with PathManager.open(file_path, "wb") as f:
+                torch.save(res, f)
+        results = OrderedDict({"sem_seg": res})
+        self._logger.info(results)
+        self._count = self._count + 1
+        return results
+
+class CityscapesEvaluator(DatasetEvaluator):
+    """
+    Base class for evaluation using cityscapes API.
+    """
+
+    def __init__(self, dataset_name, output_dir = None):
+        """
+        Args:
+            dataset_name (str): the name of the dataset.
+                It must have the following metadata associated with it:
+                "thing_classes", "gt_dir".
+        """
+        self._metadata = MetadataCatalog.get(dataset_name)
+        print("meta in constructor")
+        print(self._metadata)
+        self._cpu_device = torch.device("cpu")
+        self._logger = logging.getLogger(__name__)
+        self._output_dir = output_dir
+        self._output_dir_dataset = os.path.join(output_dir, dataset_name)
+        self._output_dir_dataset_gt = os.path.join(self._output_dir_dataset, 'ground_truth')
+        self._output_dir_dataset_inference = os.path.join(self._output_dir_dataset, 'inference')
+        #if not os.path.exists(self._output_dir_dataset):
+        os.makedirs(self._output_dir_dataset, exist_ok=True)
+        #if not os.path.exists(self._output_dir_dataset_gt):
+        os.makedirs(self._output_dir_dataset_gt, exist_ok=True)
+        os.makedirs(self._output_dir_dataset_inference, exist_ok=True)
+
+    def reset(self):
+        self._working_dir = tempfile.TemporaryDirectory(prefix="cityscapes_eval_")
+        self._temp_dir = self._working_dir.name
+        # All workers will write to the same results directory
+        # TODO this does not work in distributed training
+        assert (
+            get_local_size() == get_world_size()
+        ), "CityscapesEvaluator currently do not work with multiple machines."
+        self._temp_dir = all_gather(self._temp_dir)[0]
+        if self._temp_dir != self._working_dir.name:
+            self._working_dir.cleanup()
+        self._logger.info(
+            "Writing cityscapes results to temporary directory {} ...".format(self._temp_dir)
+        )
+
+
+
+class CityscapesSemSegEvaluator(CityscapesEvaluator):
+    """
+    Evaluate semantic segmentation results on cityscapes dataset using cityscapes API.
+    Note:
+        * It does not work in multi-machine distributed training.
+        * It contains a synchronization, therefore has to be used on all ranks.
+        * Only the main process runs evaluation.
+    """
+    def process(self, inputs, outputs):
+        from cityscapesscripts.helpers.labels import trainId2label
+
+        for input, output in zip(inputs, outputs):
+            file_name = input["file_name"]
+            basename = os.path.splitext(os.path.basename(file_name))[0]
+            pred_filename = os.path.join(self._temp_dir, basename + "_pred.png")
+
+            output = output["sem_seg"].argmax(dim=0).to(self._cpu_device).numpy()
+            pred = 255 * np.ones(output.shape, dtype=np.uint8)
+            for train_id, label in trainId2label.items():
+                if label.ignoreInEval:
+                    continue
+                pred[output == train_id] = label.id
+            Image.fromarray(pred).save(pred_filename)
+
+    def evaluate(self):
+        synchronize()
+        if get_rank() > 0:
+            return
+        # Load the Cityscapes eval script *after* setting the required env var,
+        # since the script reads CITYSCAPES_DATASET into global variables at load time.
+        import cityscapesscripts.evaluation.evalPixelLevelSemanticLabeling as cityscapes_eval
+
+        self._logger.info("Evaluating results under {} ...".format(self._temp_dir))
+
+        # set some global states in cityscapes evaluation API, before evaluating
+        cityscapes_eval.args.predictionPath = os.path.abspath(self._temp_dir)
+        cityscapes_eval.args.evalInstLevelScore = False
+        cityscapes_eval.args.predictionWalk = None
+        cityscapes_eval.args.JSONOutput = True
+        cityscapes_eval.args.colorized = False
+        cityscapes_eval.args.output_dir = self._output_dir_dataset_inference
+        cityscapes_eval.args.exportFile = os.path.join(cityscapes_eval.args.output_dir, "resultPixelLevelSemanticLabeling.json")
+        print("export File")
+        print(cityscapes_eval.args.exportFile)
+
+        # These lines are adopted from
+        # https://github.com/mcordts/cityscapesScripts/blob/master/cityscapesscripts/evaluation/evalPixelLevelSemanticLabeling.py # noqa
+        gt_dir = PathManager.get_local_path(self._metadata.gt_dir)
+        print("gt_dir")
+        print(gt_dir)
+        groundTruthImgList = glob.glob(os.path.join(gt_dir, "*", "*_gt_labelIds.png"))
+        assert len(
+            groundTruthImgList
+        ), "Cannot find any ground truth images to use for evaluation. Searched for: {}".format(
+            cityscapes_eval.args.groundTruthSearch
+        )
+        predictionImgList = []
+        for gt in groundTruthImgList:
+            predictionImgList.append(cityscapes_eval.getPrediction(cityscapes_eval.args, gt))
+
+        print(predictionImgList)
+        print(groundTruthImgList)
+        results = cityscapes_eval.evaluateImgLists(
+            predictionImgList, groundTruthImgList, cityscapes_eval.args
+        )
+        ret = OrderedDict()
+        ret["sem_seg"] = {
+            "IoU": 100.0 * results["averageScoreClasses"],
+            "iIoU": 100.0 * results["averageScoreInstClasses"],
+            "IoU_sup": 100.0 * results["averageScoreCategories"],
+            "iIoU_sup": 100.0 * results["averageScoreInstCategories"],
+        }
+        self._working_dir.cleanup()
+        return ret
+
+class SemSegImagesEvaluator(SemSegEvaluator):
+    def __init__(
+        self,
+        dataset_name,
+        distributed,
+        output_dir=None,
+        *,
+        sem_seg_loading_fn=load_image_into_numpy_array,
+        num_classes=None,
+        ignore_label=None,
+    ):
+        """
+        Args:
+            dataset_name (str): name of the dataset to be evaluated.
+            distributed (bool): if True, will collect results from all ranks for evaluation.
+                Otherwise, will evaluate the results in the current process.
+            output_dir (str): an output directory to dump results.
+            sem_seg_loading_fn: function to read sem seg file and load into numpy array.
+                Default provided, but projects can customize.
+            num_classes, ignore_label: deprecated argument
+        """
+        self._output_dir = output_dir
+        self._output_dir_dataset = os.path.join(output_dir, dataset_name)
+        self._output_dir_dataset_gt = os.path.join(self._output_dir_dataset, 'ground_truth')
+        self._output_dir_dataset_inference = os.path.join(self._output_dir_dataset, 'inference')
+        #if not os.path.exists(self._output_dir_dataset):
+        os.makedirs(self._output_dir_dataset, exist_ok=True)
+        #if not os.path.exists(self._output_dir_dataset_gt):
+        os.makedirs(self._output_dir_dataset_gt, exist_ok=True)
+        #if not os.path.exists(self._output_dir_dataset_inference):
+
+        super().__init__(dataset_name, True, self._output_dir_dataset_inference, sem_seg_loading_fn=sem_seg_loading_fn, num_classes=num_classes, ignore_label=ignore_label)
+        self._dataset_name = dataset_name
+        meta = MetadataCatalog.get(dataset_name)
+        self._class_names = meta.stuff_classes
+        self._val_extra_classes = meta.val_extra_classes
+        meta = MetadataCatalog.get(dataset_name)
+        # Dict that maps contiguous training ids to COCO category ids
+        self._num_classes = len(meta.stuff_classes)
+        self._distributed = distributed
+
+    def evaluate(self):
+        """
+        Evaluates standard semantic segmentation metrics (http://cocodataset.org/#stuff-eval):
+
+        * Mean intersection-over-union averaged across classes (mIoU)
+        * Frequency Weighted IoU (fwIoU)
+        * Mean pixel accuracy averaged across classes (mACC)
+        * Pixel Accuracy (pACC)
+        """
+        if self._distributed:
+            synchronize()
+            conf_matrix_list = all_gather(self._conf_matrix)
+            b_conf_matrix_list = all_gather(self._b_conf_matrix)
+            self._predictions = all_gather(self._predictions)
+            self._predictions = list(itertools.chain(*self._predictions))
+            if not is_main_process():
+                return
+
+            self._conf_matrix = np.zeros_like(self._conf_matrix)
+            for conf_matrix in conf_matrix_list:
+                self._conf_matrix += conf_matrix
+
+            self._b_conf_matrix = np.zeros_like(self._b_conf_matrix)
+            for b_conf_matrix in b_conf_matrix_list:
+                self._b_conf_matrix += b_conf_matrix
+
+        if self._output_dir:
+            PathManager.mkdirs(self._output_dir)
+            file_path = os.path.join(self._output_dir, "sem_seg_predictions.json")
+            with PathManager.open(file_path, "w") as f:
+                f.write(json.dumps(self._predictions))
+
+        acc = np.full(self._num_classes, np.nan, dtype=float)
+        iou = np.full(self._num_classes, np.nan, dtype=float)
+        tp = self._conf_matrix.diagonal()[:-1].astype(float)
+        pos_gt = np.sum(self._conf_matrix[:-1, :-1], axis=0).astype(float)
+        class_weights = pos_gt / np.sum(pos_gt)
+        pos_pred = np.sum(self._conf_matrix[:-1, :-1], axis=1).astype(float)
+        acc_valid = pos_gt > 0
+        acc[acc_valid] = tp[acc_valid] / pos_gt[acc_valid]
+        union = pos_gt + pos_pred - tp
+        iou_valid = np.logical_and(acc_valid, union > 0)
+        iou[iou_valid] = tp[iou_valid] / union[iou_valid]
+        macc = np.sum(acc[acc_valid]) / np.sum(acc_valid)
+        miou = np.sum(iou[iou_valid]) / np.sum(iou_valid)
+        fiou = np.sum(iou[iou_valid] * class_weights[iou_valid])
+        pacc = np.sum(tp) / np.sum(pos_gt)
+
+        if self._compute_boundary_iou:
+            b_iou = np.full(self._num_classes, np.nan, dtype=float)
+            b_tp = self._b_conf_matrix.diagonal()[:-1].astype(float)
+            b_pos_gt = np.sum(self._b_conf_matrix[:-1, :-1], axis=0).astype(float)
+            b_pos_pred = np.sum(self._b_conf_matrix[:-1, :-1], axis=1).astype(float)
+            b_union = b_pos_gt + b_pos_pred - b_tp
+            b_iou_valid = b_union > 0
+            b_iou[b_iou_valid] = b_tp[b_iou_valid] / b_union[b_iou_valid]
+
+        res = {}
+        res["mIoU"] = 100 * miou
+        res["fwIoU"] = 100 * fiou
+        for i, name in enumerate(self._class_names):
+            if iou_valid[i]:
+                res["IoU-{}".format(name)] = 100 * iou[i]
+                if name in self._val_extra_classes:
+                    unseen_IoU = unseen_IoU + 100 * iou[i]
+                else:
+                    seen_IoU = seen_IoU + 100 * iou[i]
+        #unseen_IoU = 0.
+        print("unseen IoU")
+        print(unseen_IoU)
+        if len(self._val_extra_classes) > 0:
+            unseen_IoU = unseen_IoU / len(self._val_extra_classes)
+        seen_IoU = seen_IoU / (self._num_classes - len(self._val_extra_classes))
+        res["mACC"] = 100 * macc
+        res["pACC"] = 100 * pacc
+        for i, name in enumerate(self._class_names):
+            res["ACC-{}".format(name)] = 100 * acc[i]
+            if name in self._val_extra_classes:
+                unseen_acc = unseen_acc + 100 * iou[i]
+            else:
+                seen_acc = seen_acc + 100 * iou[i]
+        unseen_acc = 0.
+        if len(self._val_extra_classes) > 0:
+            unseen_acc = unseen_acc / len(self._val_extra_classes)
+        seen_acc = seen_acc / (self._num_classes - len(self._val_extra_classes))
+        res["seen_IoU"] = seen_IoU
+        res["unseen_IoU"] = unseen_IoU
+        res["harmonic mean"] = 2 * seen_IoU * unseen_IoU / (seen_IoU + unseen_IoU)
+        # res["unseen_acc"] = unseen_acc
+        # res["seen_acc"] = seen_acc
+        if self._output_dir:
+            file_path = os.path.join(self._output_dir_dataset_inference, "sem_seg_evaluation.pth")
+            with PathManager.open(file_path, "wb") as f:
+                torch.save(res, f)
+        results = OrderedDict({"sem_seg": res})
+        self._logger.info(results)
+
+
+    def evaluate(self):
+        """
+        Evaluates standard semantic segmentation metrics (http://cocodataset.org/#stuff-eval):
+
+        * Mean intersection-over-union averaged across classes (mIoU)
+        * Frequency Weighted IoU (fwIoU)
+        * Mean pixel accuracy averaged across classes (mACC)
+        * Pixel Accuracy (pACC)
+        """
+        if self._distributed:
+            synchronize()
+            conf_matrix_list = all_gather(self._conf_matrix)
+            self._predictions = all_gather(self._predictions)
+            self._predictions = list(itertools.chain(*self._predictions))
+            if not is_main_process():
+                return
+
+            self._conf_matrix = np.zeros_like(self._conf_matrix)
+            for conf_matrix in conf_matrix_list:
+                self._conf_matrix += conf_matrix
+
+        if self._output_dir:
+            print(f"write sem_seg_predictions.json to {self._output_dir}")
+            PathManager.mkdirs(self._output_dir)
+            file_path = os.path.join(self._output_dir_dataset_inference, "sem_seg_predictions.json")
+            with PathManager.open(file_path, "w") as f:
+                f.write(json.dumps(self._predictions))
+
+        acc = np.full(self._num_classes, np.nan, dtype=np.float)
+        iou = np.full(self._num_classes, np.nan, dtype=np.float)
+        tp = self._conf_matrix.diagonal()[:-1].astype(np.float)
+        pos_gt = np.sum(self._conf_matrix[:-1, :-1], axis=0).astype(np.float)
+        class_weights = pos_gt / np.sum(pos_gt)
+        pos_pred = np.sum(self._conf_matrix[:-1, :-1], axis=1).astype(np.float)
+        acc_valid = pos_gt > 0
+        acc[acc_valid] = tp[acc_valid] / pos_gt[acc_valid]
+        iou_valid = (pos_gt + pos_pred) > 0
+        union = pos_gt + pos_pred - tp
+        iou[acc_valid] = tp[acc_valid] / union[acc_valid]
+        macc = np.sum(acc[acc_valid]) / np.sum(acc_valid)
+        miou = np.sum(iou[acc_valid]) / np.sum(iou_valid)
+        fiou = np.sum(iou[acc_valid] * class_weights[acc_valid])
+        pacc = np.sum(tp) / np.sum(pos_gt)
+        seen_IoU = 0.
+        unseen_IoU = 0.
+        seen_acc = 0.
+        unseen_acc = 0.
+        res = {}
+        res["mIoU"] = 100 * miou
+        res["fwIoU"] = 100 * fiou
+        for i, name in enumerate(self._class_names):
+            res["IoU-{}".format(name)] = 100 * iou[i]
+            if name in self._val_extra_classes:
+                unseen_IoU = unseen_IoU + 100 * iou[i]
+            else:
+                seen_IoU = seen_IoU + 100 * iou[i]
+        #unseen_IoU = 0.
+        print("unseen IoU")
+        print(unseen_IoU)
+        if len(self._val_extra_classes) > 0:
+            unseen_IoU = unseen_IoU / len(self._val_extra_classes)
+        seen_IoU = seen_IoU / (self._num_classes - len(self._val_extra_classes))
+        res["mACC"] = 100 * macc
+        res["pACC"] = 100 * pacc
+        for i, name in enumerate(self._class_names):
+            res["ACC-{}".format(name)] = 100 * acc[i]
+            if name in self._val_extra_classes:
+                unseen_acc = unseen_acc + 100 * iou[i]
+            else:
+                seen_acc = seen_acc + 100 * iou[i]
+        unseen_acc = 0.
+        if len(self._val_extra_classes) > 0:
+            unseen_acc = unseen_acc / len(self._val_extra_classes)
+        seen_acc = seen_acc / (self._num_classes - len(self._val_extra_classes))
+        res["seen_IoU"] = seen_IoU
+        res["unseen_IoU"] = unseen_IoU
+        res["harmonic mean"] = 2 * seen_IoU * unseen_IoU / (seen_IoU + unseen_IoU)
+        # res["unseen_acc"] = unseen_acc
+        # res["seen_acc"] = seen_acc
+        if self._output_dir:
+            file_path = os.path.join(self._output_dir_dataset_inference, "sem_seg_evaluation.pth")
+            with PathManager.open(file_path, "wb") as f:
+                torch.save(res, f)
+        results = OrderedDict({"sem_seg": res})
+        self._logger.info(results)
+
+        #if self._distributed:
+        #    synchronize()
+
+        #shutil.copyfile(os.path.join(self._output_dir_dataset_inference, "sem_seg_predictions.json"), os.path.join(self._output_dir_dataset_inference_count, "sem_seg_predictions.json"))
+        #produce_images([self._output_dir_dataset_gt, self._output_dir_dataset_inference], [self._dataset_name], "tmp")
+        #self._count = self._count+1
+        return results
 
 class VOCbEvaluator(SemSegEvaluator):
     """
@@ -79,11 +607,28 @@ from cat_seg import (
     add_cat_seg_config,
 )
 
+class GradientCheckHook(HookBase):
+    def after_step(self):
+        # This will be called after each training step
+        # Check for gradients in model parameters
+        model = self.trainer.model
+        for idx, (name, param) in enumerate(model.named_parameters()):
+            if param.grad is None and param.requires_grad:
+                print(f"Parameter {name} with index {idx} did not receive a gradient.")
+
+
 
 class Trainer(DefaultTrainer):
     """
     Extension of the Trainer class adapted to DETR.
     """
+
+    def build_hooks(self):
+        hooks = super().build_hooks()
+        # Add custom hook for gradient checking
+        hooks.insert(-1, GradientCheckHook())  # Insert before the optimizer step
+        return hooks
+
 
     @classmethod
     def build_evaluator(cls, cfg, dataset_name, output_folder=None):
@@ -100,10 +645,10 @@ class Trainer(DefaultTrainer):
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
         if evaluator_type in ["sem_seg", "ade20k_panoptic_seg"]:
             evaluator_list.append(
-                SemSegEvaluator(
+                SemSegImagesEvaluator(
                     dataset_name,
                     distributed=True,
-                    output_dir=output_folder,
+                    output_dir=output_folder
                 )
             )
 
@@ -132,7 +677,7 @@ class Trainer(DefaultTrainer):
             assert (
                 torch.cuda.device_count() >= comm.get_rank()
             ), "CityscapesEvaluator currently do not work with multiple machines."
-            return CityscapesSemSegEvaluator(dataset_name)
+            return CityscapesSemSegEvaluator(dataset_name, output_folder)
         if evaluator_type == "cityscapes_panoptic_seg":
             assert (
                 torch.cuda.device_count() >= comm.get_rank()
