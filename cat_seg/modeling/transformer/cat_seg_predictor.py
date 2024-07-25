@@ -55,10 +55,14 @@ class CATSegPredictor(nn.Module):
             self.class_texts = json.load(f_in)
         with open(test_class_json, 'r') as f_in:
             self.test_class_texts = json.load(f_in)
+            
+        print(self.test_class_texts)
         assert self.class_texts != None
         if self.test_class_texts == None:
             self.test_class_texts = self.class_texts
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        #print(self.test_class_texts)
   
         self.tokenizer = None
         if clip_pretrained == "ViT-G" or clip_pretrained == "ViT-H":
@@ -88,8 +92,8 @@ class CATSegPredictor(nn.Module):
         
         self.prompt_templates = prompt_templates
 
-        self.text_features = self.class_embeddings(self.class_texts, prompt_templates, clip_model).permute(1, 0, 2).float()
-        self.text_features_test = self.class_embeddings(self.test_class_texts, prompt_templates, clip_model).permute(1, 0, 2).float()
+        #self.text_features = self.class_embeddings(self.class_texts, prompt_templates, clip_model).permute(1, 0, 2).float()
+        #self.text_features_test = self.class_embeddings(self.test_class_texts, prompt_templates, clip_model).permute(1, 0, 2).float()
         
         self.clip_model = clip_model.float()
         self.clip_preprocess = clip_preprocess
@@ -152,6 +156,8 @@ class CATSegPredictor(nn.Module):
         vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
         text = self.class_texts if self.training else self.test_class_texts
         text = [text[c] for c in gt_cls] if gt_cls is not None else text
+        #text = [(" ").join(tex.split(" ")[0:1]) for tex in text]
+        #print(text)
         text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt)
         
         text = text.repeat(x.shape[0], 1, 1, 1)
@@ -168,12 +174,20 @@ class CATSegPredictor(nn.Module):
                 for template in templates:
                     for cls_split in classname_splits:
                         texts.append(template.format(cls_split))
+                #print(texts)
             else:
                 texts = [template.format(classname) for template in templates]  # format with class
             if self.tokenizer is not None:
+                #print("tokenizer")
                 texts = self.tokenizer(texts).cuda()
             else: 
-                texts = clip.tokenize(texts).cuda()
+                #print("else")
+                texts = clip.tokenize(texts)#,context_length=10, truncate=True)
+                
+                print(texts.shape)
+                print("else")
+                #print("text shape")
+                texts= texts.cuda()
             class_embeddings = clip_model.encode_text(texts)
             class_embeddings = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True)
             if len(templates) != class_embeddings.shape[0]:

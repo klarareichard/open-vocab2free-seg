@@ -31,11 +31,38 @@ python train_net.py --config $config \
  --dist-url "auto" \
  --eval-only \
  OUTPUT_DIR $output/eval \
+ MODEL.SEM_SEG_HEAD.TEST_CLASS_JSON "datasets/coco.json" \
+ DATASETS.TEST \(\"coco_2017_test_stuff_all_sem_seg\"\,\) \
+ TEST.SLIDING_WINDOW "True" \
+ MODEL.SEM_SEG_HEAD.POOLING_SIZES "[1,1]" \
+ MODEL.WEIGHTS $output/model_final.pth \
+ $opts
+
+
+#ADE20k-150
+#/ade150_descriptions_no_comma.json acdc_descriptions_revised.json
+python train_net.py --config $config \
+ --num-gpus $gpus \
+ --dist-url "auto" \
+ --eval-only \
+ OUTPUT_DIR $output/eval \
  MODEL.SEM_SEG_HEAD.TEST_CLASS_JSON "datasets/ade150.json" \
  DATASETS.TEST \(\"ade20k_150_test_sem_seg\"\,\) \
  TEST.SLIDING_WINDOW "True" \
  MODEL.SEM_SEG_HEAD.POOLING_SIZES "[1,1]" \
  MODEL.WEIGHTS $output/model_final.pth \
+ $opts
+
+#ACDC
+python train_net.py --config $config \
+ --num-gpus $gpus \
+ --dist-url "auto" \
+ --eval-only \
+ OUTPUT_DIR $output/eval \
+ MODEL.SEM_SEG_HEAD.TEST_CLASS_JSON "datasets/acdc.json" \
+ DATASETS.TEST \(\"acdc_test_stuff_all_sem_seg\"\,\) \
+ TEST.SLIDING_WINDOW "True" \
+ MODEL.SEM_SEG_HEAD.POOLING_SIZES "[1,1]" \
  $opts
 
 #ADE20k-847
