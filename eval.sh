@@ -26,17 +26,17 @@ shift 3
 opts=${@}
 
 #ADE20k-150
-#python train_net.py --config $config \
-# --num-gpus $gpus \
-# --dist-url "auto" \
-# --eval-only \
-# OUTPUT_DIR $output/eval \
-# MODEL.SEM_SEG_HEAD.TEST_CLASS_JSON "datasets/coco.json" \
-# DATASETS.TEST \(\"coco_2017_test_stuff_all_sem_seg\"\,\) \
-# TEST.SLIDING_WINDOW "True" \
-# MODEL.SEM_SEG_HEAD.POOLING_SIZES "[1,1]" \
-# MODEL.WEIGHTS $output/model_final.pth \
-# $opts
+python train_net.py --config $config \
+ --num-gpus $gpus \
+ --dist-url "auto" \
+ --eval-only \
+ OUTPUT_DIR $output/eval \
+ MODEL.SEM_SEG_HEAD.TEST_CLASS_JSON "datasets/coco_distinctive_attributes.json" \
+ DATASETS.TEST \(\"coco_2017_test_stuff_all_sem_seg\"\,\) \
+ TEST.SLIDING_WINDOW "True" \
+ MODEL.SEM_SEG_HEAD.POOLING_SIZES "[1,1]" \
+ MODEL.WEIGHTS $output/model_final.pth \
+ $opts
 
 
 #ADE20k-150
