@@ -155,13 +155,25 @@ class CATSegPredictor(nn.Module):
     def forward(self, x, vis_guidance, prompt=None, gt_cls=None):
         vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
         text = self.class_texts if self.training else self.test_class_texts
-        text = [text[c] for c in gt_cls] if gt_cls is not None else text
-        #text = [(" ").join(tex.split(" ")[0:1]) for tex in text]
-        #print(text)
-        text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt)
+        #text = [text[c] for c in gt_cls] if gt_cls is not None else text
+        #text = text[gt_cls] if gt_cls is not None else text
         
+        text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt)
+        text = text[gt_cls] if gt_cls is not None else text
         text = text.repeat(x.shape[0], 1, 1, 1)
         out = self.transformer(x, text, vis)
+        
+        if gt_cls is not None:
+            C_all = self.class_texts if self.training else self.test_class_texts
+            C_all = len(C_all)
+
+            B, C, H, W = out.size()
+            out_all = torch.zeros(B, C_all, H, W, dtype=out.dtype, device=out.device, requires_grad=out.requires_grad)
+
+            for i, c in enumerate(gt_cls):
+                out_all = out_all.index_add(1, c, out[:, i, :, :].unsqueeze(1))
+            return out_all
+
         return out
 
     @torch.no_grad()

@@ -91,3 +91,4 @@ def add_cat_seg_config(cfg):
 
     cfg.MODEL.SEM_SEG_HEAD.CLIP_FINETUNE = "attention"
     cfg.TEST.SLIDING_WINDOW = False
+    cfg.MODEL.GT_CLS = False

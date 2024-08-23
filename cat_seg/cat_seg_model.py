@@ -34,6 +34,7 @@ class CATSeg(nn.Module):
         clip_finetune: str,
         backbone_multiplier: float,
         clip_pretrained: str,
+        gt_classes: bool = False,
     ):
         """
         Args:
@@ -81,10 +82,13 @@ class CATSeg(nn.Module):
         self.upsample1 = nn.ConvTranspose2d(self.proj_dim, 256, kernel_size=2, stride=2)
         self.upsample2 = nn.ConvTranspose2d(self.proj_dim, 128, kernel_size=4, stride=4)
 
+        self.gt_classes = gt_classes
+
         self.layer_indexes = [3, 7] if clip_pretrained == "ViT-B/16" else [7, 15] 
         self.layers = []
         for l in self.layer_indexes:
             self.sem_seg_head.predictor.clip_model.visual.transformer.resblocks[l].register_forward_hook(lambda m, _, o: self.layers.append(o))
+
 
 
     @classmethod
@@ -106,6 +110,7 @@ class CATSeg(nn.Module):
             "clip_finetune": cfg.MODEL.SEM_SEG_HEAD.CLIP_FINETUNE,
             "backbone_multiplier": cfg.SOLVER.BACKBONE_MULTIPLIER,
             "clip_pretrained": cfg.MODEL.SEM_SEG_HEAD.CLIP_PRETRAINED,
+            "gt_classes": getattr(cfg.MODEL, "GT_CLS", False),
         }
 
     @property
@@ -138,6 +143,11 @@ class CATSeg(nn.Module):
         if not self.training and self.sliding_window:
             return self.inference_sliding_window(batched_inputs)
 
+        gt_cls = [x.get("sem_seg", "").to(self.device) for x in batched_inputs] if self.gt_classes else None
+        if gt_cls is not None:
+            gt_cls = torch.unique(torch.cat(gt_cls, dim=0))
+            gt_cls = gt_cls[gt_cls != 255].to(self.device) # @TODO
+
         clip_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
         clip_images = ImageList.from_tensors(clip_images, self.size_divisibility)
 
@@ -156,7 +166,7 @@ class CATSeg(nn.Module):
         res5 = self.upsample2(res5)
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
 
-        outputs = self.sem_seg_head(clip_features, features)
+        outputs = self.sem_seg_head(clip_features, features, gt_cls = gt_cls)
         if self.training:
             targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
             outputs = F.interpolate(outputs, size=(targets.shape[-2], targets.shape[-1]), mode="bilinear", align_corners=False)
@@ -187,6 +197,12 @@ class CATSeg(nn.Module):
     @torch.no_grad()
     def inference_sliding_window(self, batched_inputs, kernel=384, overlap=0.333, out_res=[640, 640]):
         images = [x["image"].to(self.device, dtype=torch.float32) for x in batched_inputs]
+        gt_cls = [x.get("sem_seg", "").to(self.device) for x in batched_inputs] if self.gt_classes else None
+        if gt_cls is not None:
+            gt_cls = torch.unique(torch.cat(gt_cls, dim=0))
+            gt_cls = gt_cls[gt_cls != 255].to(self.device) # @TODO
+
+
         stride = int(kernel * (1 - overlap))
         unfold = nn.Unfold(kernel_size=kernel, stride=stride)
         fold = nn.Fold(out_res, kernel_size=kernel, stride=stride)
@@ -207,7 +223,7 @@ class CATSeg(nn.Module):
         res5 = self.upsample2(rearrange(self.layers[1][1:, :, :], "(H W) B C -> B C H W", H=24))
 
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
-        outputs = self.sem_seg_head(clip_features, features)
+        outputs = self.sem_seg_head(clip_features, features, gt_cls = gt_cls)
 
         outputs = F.interpolate(outputs, size=kernel, mode="bilinear", align_corners=False)
         outputs = outputs.sigmoid()
