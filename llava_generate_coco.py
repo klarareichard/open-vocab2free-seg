@@ -21,6 +21,32 @@ import os
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch import nn
 
+def update_json_with_captions(batch_updates, json_file_path):
+    """
+    Updates the JSON file with multiple file_name and response pairs.
+
+    Args:
+    - batch_updates (list of tuples): A list containing (file_name, response) tuples.
+    - json_file_path (str): The path to the JSON file to be updated.
+
+    Returns:
+    - None
+    """
+    # Read existing data from the JSON file
+    if os.path.exists(json_file_path):
+        with open(json_file_path, 'r') as f:
+            existing_data = json.load(f)
+    else:
+        existing_data = {}
+
+    # Update the entries with new file_name and response pairs
+    for file_name, response in batch_updates:
+        existing_data[file_name] = response
+
+    # Write the updated data back to the JSON file
+    with open(json_file_path, 'w') as f:
+        json.dump(existing_data, f, indent=4)
+
 def extract_image_id(file_name):
     # Extract the filename from the full path
     base_name = os.path.basename(file_name)
@@ -32,30 +58,47 @@ def extract_image_id(file_name):
     return int(name_without_ext.split("_")[-1].lstrip('0'))
     #return name_without_ext
     
-def update_json_with_caption(file_name, caption, json_file):
+
+def update_json_with_captions(batch_updates, json_file_path):
+    """
+    Updates the JSON file with multiple file_name and response pairs.
+
+    Args:
+    - batch_updates (list of tuples): A list containing (file_name, response) tuples.
+    - json_file_path (str): The path to the JSON file to be updated.
+
+    Returns:
+    - None
+    """
+    # Try to load existing data from the JSON file
     try:
-        # Load the existing JSON data
-        with open(json_file, 'r') as f:
-            data = json.load(f)
+        with open(json_file_path, 'r') as f:
+            existing_data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        # If the file doesn't exist or is empty, create an empty list
-        data = []
+        # If the file doesn't exist or cannot be decoded, initialize as an empty list
+        existing_data = []
 
-    # Check if the file_name already exists
-    entry_found = False
-    for entry in data:
-        if entry["file_name"] == file_name:
-            entry["caption"] = caption  # Update the caption
-            entry_found = True
-            break
+    # Ensure existing_data is a list
+    if not isinstance(existing_data, list):
+        raise TypeError(f"Expected a list in the JSON file, but got {type(existing_data).__name__}")
 
-    # If the entry was not found, add a new one
-    if not entry_found:
-        data.append({"file_name": file_name, "caption": caption})
+    # Create a dictionary from existing_data for faster lookup
+    existing_data_dict = {entry["file_name"]: entry for entry in existing_data if "file_name" in entry}
 
-    # Save the updated data back to the JSON file
-    with open(json_file, 'w') as f:
-        json.dump(data, f, indent=4)
+    for file_name, response in batch_updates:
+        if file_name in existing_data_dict:
+            # Update existing entry
+            existing_data_dict[file_name]["caption"] = response
+        else:
+            # Add new entry
+            existing_data_dict[file_name] = {"file_name": file_name, "caption": response}
+
+    # Convert the dictionary back to a list
+    updated_data = list(existing_data_dict.values())
+
+    # Write the updated data back to the JSON file
+    with open(json_file_path, 'w') as f:
+        json.dump(updated_data, f, indent=4)
     
 def save_captions_to_json(dataset_dicts, output_file):
     # Extract the required fields
@@ -89,6 +132,7 @@ def process_batch_on_gpu(gpu_id, model, processor, dataset_dicts, start_idx, end
     batch_images = []
     batch_prompts = []
     batch_image_ids = []
+    batch_file_names = []
     #batch_gt = []
 
     for idx in range(start_idx, end_idx):
@@ -101,22 +145,19 @@ def process_batch_on_gpu(gpu_id, model, processor, dataset_dicts, start_idx, end
         
         # Convert the image to a NumPy array
         sem_seg_array = np.array(sem_seg_image)
-        print(data.keys())
         unique_classes = np.unique(sem_seg_array)
         #if gt_cls is not None:
         #gt_cls = torch.unique(torch.cat(sem_seg_array, dim=0))
         unique_classes = unique_classes[unique_classes != 255] #.to(self.device) # @TODO
-        print("unique_classes")
-        print(unique_classes)
         gt_text = [classnames[c] for c in unique_classes]
-        print("gt_text")
-        print(gt_text)
         
         # Check if caption already exists before processing
         if file_name in existing_captions:
             print(f"Caption for {file_name} already exists. Skipping LLAVA query...")
             continue  # Skip this image if it already has a caption
         
+        text2 = "The output should be in this form: {object1: [adjective1, adjective2, ..., ], object2: [adjective3, adjective4, ..., ], ..., }."
+        text3 = "This is an example how the output should look. {giraffe: [tall, brown, spotted, interacting], tree: [tall, green, leafy]}"
         conversation = [
                     {
                         "role": "user",
@@ -124,7 +165,7 @@ def process_batch_on_gpu(gpu_id, model, processor, dataset_dicts, start_idx, end
                             {"type": "image"},
                             {
                                 "type": "text",
-                                "text": f"The objects in the image are: [{gt_text}]. Please generate a short list of adjectives for each object that describe how the object looks in the image. Make sure to only list adjectives that are distinctive between the objects in the image. The output should be in this form: {{object1: [adjective1, adjective2, ..., ], object2: [adjective3, adjective4, ..., ], ..., }}."
+                                "text": f"The objects in the image are: {gt_text}. Please generate a short list of adjectives for each object that describe how the object looks in the image. " + text3
                             },
                         ],
                     },
@@ -137,6 +178,7 @@ def process_batch_on_gpu(gpu_id, model, processor, dataset_dicts, start_idx, end
         batch_images.append(img)
         batch_prompts.append(prompt)
         batch_image_ids.append(image_id)
+        batch_file_names.append(file_name)
         
 
         if len(batch_images) == batch_size or idx == end_idx - 1:
@@ -163,14 +205,19 @@ def process_batch_on_gpu(gpu_id, model, processor, dataset_dicts, start_idx, end
             #print(f"Batch responses: {responses}")
             #print(f"Batch image IDs: {batch_image_ids}")
 
-            for image_id, response in zip(batch_image_ids, responses):
+            batch_updates = []
+            for file_name, response in zip(batch_file_names, responses):
                 #captions[image_id] = response
-                update_json_with_caption(file_name, response, "llava-1.6-predicted_classes_coco_train"+str(gpu_id)+".json")
+                batch_updates.append((file_name, response))
+                #update_json_with_caption(file_name, response, "llava-1.6-predicted_classes_coco_train"+str(gpu_id)+".json")
+            update_json_with_captions(batch_updates, f"llava-1.6-predicted_classes_coco_train{gpu_id}.json")
+
             
             # Clear the batch lists
             batch_images = []
             batch_prompts = []
             batch_image_ids = []
+            batch_file_names = []
             #batch_responses = []
 
     #for idx in range(start_idx, end_idx):
@@ -242,6 +289,8 @@ def parallel_process_images(model, processor, dataset_dicts, batch_size):
 if __name__ == '__main__':
 
     processor = LlavaNextProcessor.from_pretrained("llava-hf/llava-v1.6-vicuna-7b-hf")
+    processor.tokenizer.padding_side = 'left'
+    #tokenizer.padding_side = 'left'
     # LlavaForConditionalGeneration
     model = LlavaNextForConditionalGeneration.from_pretrained("llava-hf/llava-v1.6-vicuna-7b-hf", torch_dtype=torch.float16) #load_in_4bit=True)
     #model = nn.DataParallel(model)
@@ -264,7 +313,7 @@ if __name__ == '__main__':
     # Run the parallel processing
     dataset_dicts = load_sem_seg(gt_dir, image_dir, gt_ext="png", image_ext="jpg")
     captions = mp.Manager().dict()
-    captions = parallel_process_images(model, processor, dataset_dicts, 4)#dataset_dicts, batch_size)
+    captions = parallel_process_images(model, processor, dataset_dicts, 1)#dataset_dicts, batch_size)
     
     
     #for dataset_dict in dataset_dicts:
