@@ -17,6 +17,7 @@ from cat_seg.third_party import imagenet_templates
 
 import numpy as np
 import open_clip
+import spacy
 class CATSegPredictor(nn.Module):
     @configurable
     def __init__(
@@ -91,6 +92,7 @@ class CATSegPredictor(nn.Module):
             raise NotImplementedError
         
         self.prompt_templates = prompt_templates
+        self.nlp = spacy.load("en_core_web_sm")
 
         #self.text_features = self.class_embeddings(self.class_texts, prompt_templates, clip_model).permute(1, 0, 2).float()
         #self.text_features_test = self.class_embeddings(self.test_class_texts, prompt_templates, clip_model).permute(1, 0, 2).float()
@@ -152,13 +154,13 @@ class CATSegPredictor(nn.Module):
 
         return ret
 
-    def forward(self, x, vis_guidance, prompt=None, gt_cls=None):
+    def forward(self, x, vis_guidance, prompt=None, gt_cls=None, adjectives=None):
         vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
         text = self.class_texts if self.training else self.test_class_texts
         #text = [text[c] for c in gt_cls] if gt_cls is not None else text
         #text = text[gt_cls] if gt_cls is not None else text
         
-        text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt)
+        text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt, adjectives)
         text = text[gt_cls] if gt_cls is not None else text
         text = text.repeat(x.shape[0], 1, 1, 1)
         out = self.transformer(x, text, vis)
@@ -210,36 +212,72 @@ class CATSegPredictor(nn.Module):
         zeroshot_weights = torch.stack(zeroshot_weights, dim=1).cuda()
         return zeroshot_weights
     
-    def get_text_embeds(self, classnames, templates, clip_model, prompt=None):
-        if self.cache is not None and not self.training:
-            return self.cache
-        
-        if self.tokens is None or prompt is not None:
-            tokens = []
-            for classname in classnames:
-                if ', ' in classname:
-                    classname_splits = classname.split(', ')
-                    texts = [template.format(classname_splits[0]) for template in templates]
-                else:
-                    texts = [template.format(classname) for template in templates]  # format with class
-                if self.tokenizer is not None:
-                    texts = self.tokenizer(texts).cuda()
-                else: 
-                    texts = clip.tokenize(texts).cuda()
-                tokens.append(texts)
-            tokens = torch.stack(tokens, dim=0).squeeze(1)
-            if prompt is None:
-                self.tokens = tokens
-        elif self.tokens is not None and prompt is None:
-            tokens = self.tokens
+
+    def classify_attributes_with_spacy(attribute_list):
+        before_noun = []
+        after_noun = []
+
+        for attribute in attribute_list:
+            doc = self.nlp(attribute)
+
+            # Check the first word's part-of-speech tag and dependency
+            first_token = doc[0]
+            if first_token.dep_ in {'prep', 'aux'} or first_token.pos_ in {'VERB'}:
+                # If it starts with a preposition, auxiliary verb, or main verb
+                after_noun.append(attribute)
+            else:
+                # Otherwise, assume it comes before the noun
+                before_noun.append(attribute)
+
+        return before_noun, after_noun
+    
+    def get_text_embeds(self, classnames, templates, clip_model, prompt=None, adjectives=None):
+
+        tokens = []
+        # Process each classname
+        for classname in classnames:
+            if classname in adjectives:
+                adjectives_per_class = adjectives[classname]
+                if len(adjectives_per_class):
+                    adjective = adjectives_per_class[0]
+                    print(adjective)
+                before_noun, after_noun = self.classify_attributes_with_spacy([adjective])
+
+                print("BEFORE NOUN")
+                print(before_noun)
+                adj_desc_after = None
+                adj_desc_before = None
+                if len(before_noun):
+                    adj_desc_before = " ".join(before_noun)
+                if len(after_noun):
+                    adj_desc_after = " ".join(after_noun)
+                #print(adj_desc)
+            else:
+                adj_desc_before = None
+                adj_desc_after = None
+            
+            
+            #formatted_text = f"{adj_desc_before} {classname}" if adj_desc else classname
+            formatted_text = classname
+
+            # Add adj_desc_before if it is not None
+            if adj_desc_before:
+                formatted_text = f"{adj_desc_before} {formatted_text}"
+
+            # Add adj_desc_after if it is not None
+            if adj_desc_after:
+                formatted_text = f"{formatted_text} {adj_desc_after}"
+            texts = [template.format(formatted_text) for template in templates]
+            if self.tokenizer is not None:
+                texts = self.tokenizer(texts).cuda()
+            else:
+                texts = clip.tokenize(texts).cuda()
+            tokens.append(texts)
+        tokens = torch.stack(tokens, dim=0).squeeze(1)
 
         class_embeddings = clip_model.encode_text(tokens, prompt)
         class_embeddings = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True)
-        
-        
+
         class_embeddings = class_embeddings.unsqueeze(1)
-        
-        if not self.training:
-            self.cache = class_embeddings
-            
+
         return class_embeddings

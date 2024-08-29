@@ -2,6 +2,7 @@ import os
 
 from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.data.datasets import load_sem_seg
+import json
 
 COCO_CATEGORIES = [
     {"color": [220, 20, 60], "isthing": 1, "id": 1, "name": "person"},
@@ -193,18 +194,98 @@ def _get_coco_stuff_meta():
     }
     return ret
 
+def extract_image_id(file_name):
+    # Extract the filename from the full path
+    base_name = os.path.basename(file_name)
+
+    # Remove the file extension
+    name_without_ext = os.path.splitext(base_name)[0]
+    name_without_ = name_without_ext.split("_")[-1]
+    # print(name_without_)
+    # Return the image ID
+    return int(name_without_.lstrip('0'))
+
+def load_coco_stuff_with_attributes(image_dir, gt_dir, adjectives_file):
+    dataset_dicts = load_sem_seg(image_dir, gt_dir, gt_ext="png", image_ext="jpg")
+    print(adjectives_file)
+    with open(adjectives_file, 'r') as f:
+        adjectives_data = json.load(f)
+
+    adjectives = {}
+    class_names = {}
+    index = 0
+    print(len(adjectives_data))
+    for data in adjectives_data:
+        file_name = data["file_name"]
+        image_id = extract_image_id(file_name)
+        data["image_id"] = image_id
+        #if index < 11:
+            #print(type(image_id))
+        
+        adjectives_dict = data['attributes_list']
+        
+        
+       
+        class_name = data['class_names']
+
+        adjectives[image_id] = adjectives_dict
+        class_names[image_id] = class_name
+        
+
+    # print(captions_data.keys())
+
+    index = 0
+    print(len(dataset_dicts))
+    for dataset_dict in dataset_dicts:
+        file_name = dataset_dict["file_name"]
+        image_id = extract_image_id(file_name)
+        dataset_dict["image_id"] = image_id
+        
+        #if image_id in adjectives:
+        dataset_dict["attributes_list"] = adjectives[image_id]
+        
+       # if image_id in class_names:
+        dataset_dict["class_names"] = class_names[image_id]
+        
+
+    return dataset_dicts
+
 def register_all_coco_stuff_10k(root):
     root = os.path.join(root, "coco-stuff")
     meta = _get_coco_stuff_meta()
-    for name, image_dirname, sem_seg_dirname in [
-        ("train", "images/train2017", "annotations_detectron2/train2017"),
-        ("test", "images/val2017", "annotations_detectron2/val2017"),
+    for name, image_dirname, sem_seg_dirname, attributes_list_filename in [
+        ("train", "images/train2017", "annotations_detectron2/train2017", "llava-1.6-predicted_classes_coco_train.json"),
+        #("test", "images/val2017", "annotations_detectron2/val2017", "llava-1.6-predicted_classes_coco_validation_right.json"),
     ]:
         image_dir = os.path.join(root, image_dirname)
         gt_dir = os.path.join(root, sem_seg_dirname)
+        
+        attributes_list_file = os.path.join(root, attributes_list_filename)
         name = f"coco_2017_{name}_stuff_all_sem_seg"
         DatasetCatalog.register(
-            name, lambda x=image_dir, y=gt_dir: load_sem_seg(y, x, gt_ext="png", image_ext="jpg")
+            name, lambda x=image_dir, y=gt_dir: load_coco_stuff_with_attributes(y, x, attributes_list_file) #gt_ext="png", image_ext="jpg")
+        )
+        MetadataCatalog.get(name).set(
+            image_root=image_dir,
+            sem_seg_root=gt_dir,
+            evaluator_type="sem_seg",
+            ignore_label=255,
+            **meta,
+        )
+def register_all_coco_stuff_10k_val(root):
+    root = os.path.join(root, "coco-stuff")
+    meta = _get_coco_stuff_meta()
+    for name, image_dirname, sem_seg_dirname, attributes_list_filename in [
+        #("train", "images/train2017", "annotations_detectron2/train2017", "llava-1.6-predicted_classes_coco_train.json"),
+        ("test", "images/val2017", "annotations_detectron2/val2017", "llava-1.6-predicted_classes_coco_validation_right.json"),
+    ]:
+        image_dir = os.path.join(root, image_dirname)
+        gt_dir = os.path.join(root, sem_seg_dirname)
+        
+        attributes_list_file = os.path.join(root, attributes_list_filename)
+        name = f"coco_2017_{name}_stuff_all_sem_seg"
+        DatasetCatalog.register(
+            name, lambda x=image_dir, y=gt_dir: load_coco_stuff_with_attributes(y, x, attributes_list_file) #gt_ext="png", image_ext="jpg")
         )
         MetadataCatalog.get(name).set(
             image_root=image_dir,
@@ -214,6 +295,8 @@ def register_all_coco_stuff_10k(root):
             **meta,
         )
 
+
 _root = os.getenv("DETECTRON2_DATASETS", "datasets")
 print(_root)
 register_all_coco_stuff_10k(_root)
+register_all_coco_stuff_10k_val(_root)

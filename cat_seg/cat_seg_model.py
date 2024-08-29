@@ -140,6 +140,11 @@ class CATSeg(nn.Module):
         """
         
         images = [x["image"].to(self.device) for x in batched_inputs]
+        
+        #captions = [x["caption"] for x in batched_inputs]
+        
+        adjectives = [x["attributes_list"] for x in batched_inputs]
+        print(adjectives)
         if not self.training and self.sliding_window:
             return self.inference_sliding_window(batched_inputs)
 
@@ -165,8 +170,7 @@ class CATSeg(nn.Module):
         res4 = self.upsample1(res4)
         res5 = self.upsample2(res5)
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
-
-        outputs = self.sem_seg_head(clip_features, features, gt_cls = gt_cls)
+        outputs = self.sem_seg_head(clip_features, features, gt_cls = gt_cls, adjectives = adjectives)
         if self.training:
             targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
             outputs = F.interpolate(outputs, size=(targets.shape[-2], targets.shape[-1]), mode="bilinear", align_corners=False)

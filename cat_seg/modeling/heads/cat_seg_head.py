@@ -53,11 +53,11 @@ class CATSegHead(nn.Module):
             ),
         }
 
-    def forward(self, features, guidance_features, prompt=None, gt_cls=None):
+    def forward(self, features, guidance_features, prompt=None, gt_cls=None, adjectives=None):
         """
         Arguments:
             img_feats: (B, C, HW)
             guidance_features: (B, C, )
         """
         img_feat = rearrange(features[:, 1:, :], "b (h w) c->b c h w", h=self.feature_resolution[0], w=self.feature_resolution[1])
-        return self.predictor(img_feat, guidance_features, prompt, gt_cls)
+        return self.predictor(img_feat, guidance_features, prompt, gt_cls, adjectives)
