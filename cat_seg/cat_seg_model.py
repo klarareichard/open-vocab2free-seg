@@ -144,7 +144,6 @@ class CATSeg(nn.Module):
         #captions = [x["caption"] for x in batched_inputs]
         
         adjectives = [x["attributes_list"] for x in batched_inputs]
-        print(adjectives)
         if not self.training and self.sliding_window:
             return self.inference_sliding_window(batched_inputs)
 

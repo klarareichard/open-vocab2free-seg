@@ -213,7 +213,7 @@ class CATSegPredictor(nn.Module):
         return zeroshot_weights
     
 
-    def classify_attributes_with_spacy(attribute_list):
+    def classify_attributes_with_spacy(self, attribute_list):
         before_noun = []
         after_noun = []
 
@@ -236,22 +236,21 @@ class CATSegPredictor(nn.Module):
         tokens = []
         # Process each classname
         for classname in classnames:
-            if classname in adjectives:
-                adjectives_per_class = adjectives[classname]
+            #adjectives = adjectives[0]
+            if classname in adjectives[0]:
+                adjectives_per_class = adjectives[0][classname]
                 if len(adjectives_per_class):
                     adjective = adjectives_per_class[0]
-                    print(adjective)
-                before_noun, after_noun = self.classify_attributes_with_spacy([adjective])
+                    #print(adjective)
+                    attribute_list = [adjective]
+                before_noun, after_noun = self.classify_attributes_with_spacy(attribute_list)
 
-                print("BEFORE NOUN")
-                print(before_noun)
                 adj_desc_after = None
                 adj_desc_before = None
                 if len(before_noun):
                     adj_desc_before = " ".join(before_noun)
                 if len(after_noun):
                     adj_desc_after = " ".join(after_noun)
-                #print(adj_desc)
             else:
                 adj_desc_before = None
                 adj_desc_after = None
@@ -267,6 +266,9 @@ class CATSegPredictor(nn.Module):
             # Add adj_desc_after if it is not None
             if adj_desc_after:
                 formatted_text = f"{formatted_text} {adj_desc_after}"
+                
+            #print("formatted_text")
+            #print(formatted_text)
             texts = [template.format(formatted_text) for template in templates]
             if self.tokenizer is not None:
                 texts = self.tokenizer(texts).cuda()
