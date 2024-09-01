@@ -154,13 +154,13 @@ class CATSegPredictor(nn.Module):
 
         return ret
 
-    def forward(self, x, vis_guidance, prompt=None, gt_cls=None, adjectives=None):
+    def forward(self, x, vis_guidance, prompt=None, gt_cls=None, adjectives=None, mapped_class_names = None, original_class_names = None):
         vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
         text = self.class_texts if self.training else self.test_class_texts
         #text = [text[c] for c in gt_cls] if gt_cls is not None else text
         #text = text[gt_cls] if gt_cls is not None else text
         
-        text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt, adjectives)
+        text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt, adjectives, mapped_class_names, original_class_names)
         text = text[gt_cls] if gt_cls is not None else text
         text = text.repeat(x.shape[0], 1, 1, 1)
         out = self.transformer(x, text, vis)
@@ -231,9 +231,31 @@ class CATSegPredictor(nn.Module):
 
         return before_noun, after_noun
     
-    def get_text_embeds(self, classnames, templates, clip_model, prompt=None, adjectives=None):
+    def adapt_adjectives(self, mapped_class_names, class_names, adjectives):
+        # Check if mapped_class_names is not None
+        if mapped_class_names is not None:
+            # Create a new adjectives dictionary with mapped class names as keys
+            new_adjectives = {}
+
+            # Iterate through the class_names and mapped_class_names together
+            for original_name, mapped_name in zip(class_names, mapped_class_names):
+                if original_name in adjectives:
+                    new_adjectives[mapped_name] = adjectives[original_name]
+
+            # Return the new adjectives dictionary with updated keys
+            return new_adjectives
+
+        # If mapped_class_names is None, return the original adjectives dictionary
+        return adjectives
+
+
+    
+    def get_text_embeds(self, classnames, templates, clip_model, prompt=None, adjectives=None, mapped_class_names = None, original_class_names = None):
 
         tokens = []
+        
+        if adjectives is not None and mapped_class_names is not None and original_class_names is not None: 
+            adjectives[0] = self.adapt_adjectives(mapped_class_names[0], original_class_names[0], adjectives[0])
         # Process each classname
         for classname in classnames:
             #adjectives = adjectives[0]

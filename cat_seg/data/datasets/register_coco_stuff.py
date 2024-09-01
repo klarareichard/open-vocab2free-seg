@@ -213,6 +213,7 @@ def load_coco_stuff_with_attributes(image_dir, gt_dir, adjectives_file):
 
     adjectives = {}
     class_names = {}
+    mapped_class_names = {}
     index = 0
     print(len(adjectives_data))
     for data in adjectives_data:
@@ -227,9 +228,12 @@ def load_coco_stuff_with_attributes(image_dir, gt_dir, adjectives_file):
         
        
         class_name = data['class_names']
+        
+        mapped_class_name = data['mapped_class_names']
 
         adjectives[image_id] = adjectives_dict
         class_names[image_id] = class_name
+        mapped_class_names[image_id] = mapped_class_name
         
 
     # print(captions_data.keys())
@@ -246,6 +250,7 @@ def load_coco_stuff_with_attributes(image_dir, gt_dir, adjectives_file):
         
        # if image_id in class_names:
         dataset_dict["class_names"] = class_names[image_id]
+        dataset_dict["mapped_class_names"] = mapped_class_names[image_id]
         
 
     return dataset_dicts
@@ -277,7 +282,9 @@ def register_all_coco_stuff_10k_val(root):
     meta = _get_coco_stuff_meta()
     for name, image_dirname, sem_seg_dirname, attributes_list_filename in [
         #("train", "images/train2017", "annotations_detectron2/train2017", "llava-1.6-predicted_classes_coco_train.json"),
-        ("test", "images/val2017", "annotations_detectron2/val2017", "llava-1.6-gt_classes_predicted_adj_coco_val.json"),#"llava-1.6-predicted_classes_coco_validation_right.json"),
+        ("test", "images/val2017", "annotations_detectron2/val2017", 
+         "llava-1.6-predicted_classes_coco_validation_right_remapped.json"),
+         #"llava-1.6-gt_classes_predicted_adj_coco_val.json"),#"llava-1.6-predicted_classes_coco_validation_right.json"),
     ]:
         image_dir = os.path.join(root, image_dirname)
         gt_dir = os.path.join(root, sem_seg_dirname)

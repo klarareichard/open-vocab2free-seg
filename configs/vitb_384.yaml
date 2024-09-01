@@ -3,7 +3,7 @@ MODEL:
   META_ARCHITECTURE: "CATSeg"
   PIXEL_MEAN: [123.675, 116.280, 103.530]
   PIXEL_STD: [58.395, 57.120, 57.375]
-  GT_CLS: False
+  GT_CLS: True
   SEM_SEG_HEAD:
     NAME: "CATSegHead"
     IN_FEATURES: ["res2", "res3", "res4"]
