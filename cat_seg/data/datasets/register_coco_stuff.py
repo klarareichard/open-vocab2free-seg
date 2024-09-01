@@ -277,7 +277,7 @@ def register_all_coco_stuff_10k_val(root):
     meta = _get_coco_stuff_meta()
     for name, image_dirname, sem_seg_dirname, attributes_list_filename in [
         #("train", "images/train2017", "annotations_detectron2/train2017", "llava-1.6-predicted_classes_coco_train.json"),
-        ("test", "images/val2017", "annotations_detectron2/val2017", "llava-1.6-predicted_classes_coco_validation_right.json"),
+        ("test", "images/val2017", "annotations_detectron2/val2017", "llava-1.6-gt_classes_predicted_adj_coco_val.json"),#"llava-1.6-predicted_classes_coco_validation_right.json"),
     ]:
         image_dir = os.path.join(root, image_dirname)
         gt_dir = os.path.join(root, sem_seg_dirname)
