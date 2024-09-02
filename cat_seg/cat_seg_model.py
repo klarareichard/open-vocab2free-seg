@@ -149,9 +149,10 @@ class CATSeg(nn.Module):
         if not self.training and self.sliding_window:
             return self.inference_sliding_window(batched_inputs)
 
-        gt_cls = [x.get("sem_seg", "").to(self.device) for x in batched_inputs] if self.gt_classes else None
+        gt_cls = [x.get("sem_seg", "") for x in batched_inputs] if self.gt_classes else None
         if gt_cls is not None:
             gt_cls = torch.unique(torch.cat(gt_cls, dim=0))
+            print(gt_cls)
             gt_cls = gt_cls[gt_cls != 255].to(self.device) # @TODO
 
         clip_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in images]

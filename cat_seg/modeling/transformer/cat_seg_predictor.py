@@ -4,6 +4,7 @@
 # Modified by Heeseong Shin from: https://github.com/dingjiansw101/ZegFormer/blob/main/mask_former/mask_former_model.py
 import fvcore.nn.weight_init as weight_init
 import torch
+import random
 
 from torch import nn
 from torch.nn import functional as F
@@ -158,6 +159,7 @@ class CATSegPredictor(nn.Module):
         vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
         text = self.class_texts if self.training else self.test_class_texts
         #text = [text[c] for c in gt_cls] if gt_cls is not None else text
+        #print(text)
         #text = text[gt_cls] if gt_cls is not None else text
         
         text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt, adjectives, mapped_class_names, original_class_names)
@@ -262,7 +264,8 @@ class CATSegPredictor(nn.Module):
             if classname in adjectives[0]:
                 adjectives_per_class = adjectives[0][classname]
                 if len(adjectives_per_class):
-                    adjective = adjectives_per_class[0]
+                    random_index = random.randint(0, len(adjectives_per_class) - 1)
+                    adjective = adjectives_per_class[random_index]
                     #print(adjective)
                     attribute_list = [adjective]
                 before_noun, after_noun = self.classify_attributes_with_spacy(attribute_list)
@@ -276,8 +279,7 @@ class CATSegPredictor(nn.Module):
             else:
                 adj_desc_before = None
                 adj_desc_after = None
-            
-            
+            ###!!!!!!!
             #formatted_text = f"{adj_desc_before} {classname}" if adj_desc else classname
             formatted_text = classname
 

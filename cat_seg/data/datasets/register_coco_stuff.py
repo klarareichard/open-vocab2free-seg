@@ -229,7 +229,10 @@ def load_coco_stuff_with_attributes(image_dir, gt_dir, adjectives_file):
        
         class_name = data['class_names']
         
-        mapped_class_name = data['mapped_class_names']
+        if "mapped_class_names" in data:
+            mapped_class_name = data['mapped_class_names']
+        else:
+            mapped_class_name = None
 
         adjectives[image_id] = adjectives_dict
         class_names[image_id] = class_name
@@ -259,7 +262,7 @@ def register_all_coco_stuff_10k(root):
     root = os.path.join(root, "coco-stuff")
     meta = _get_coco_stuff_meta()
     for name, image_dirname, sem_seg_dirname, attributes_list_filename in [
-        ("train", "images/train2017", "annotations_detectron2/train2017", "llava-1.6-predicted_classes_coco_train.json"),
+        ("train", "images/train2017", "annotations_detectron2/train2017", "llava-1.6-predicted_classes_no_gt_coco_train_right_remapped.json"),#"llava-1.6-predicted_classes_no_gt_coco_train_right_remapped.json") #"llava-1.6-predicted_classes_no_gt_coco_train_right.json"),
         #("test", "images/val2017", "annotations_detectron2/val2017", "llava-1.6-predicted_classes_coco_validation_right.json"),
     ]:
         image_dir = os.path.join(root, image_dirname)
