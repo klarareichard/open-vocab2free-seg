@@ -143,16 +143,15 @@ class CATSeg(nn.Module):
         
         #captions = [x["caption"] for x in batched_inputs]
         
-        adjectives = [x["attributes_list"] for x in batched_inputs]
-        mapped_class_names = [x["mapped_class_names"] for x in batched_inputs]
-        original_class_names = [x["class_names"] for x in batched_inputs]
+        adjectives = [x.get("attributes_list", "") for x in batched_inputs]
+        mapped_class_names = [x.get("mapped_class_names", "") for x in batched_inputs]
+        original_class_names = [x.get("class_names", "") for x in batched_inputs]
         if not self.training and self.sliding_window:
             return self.inference_sliding_window(batched_inputs)
 
         gt_cls = [x.get("sem_seg", "") for x in batched_inputs] if self.gt_classes else None
         if gt_cls is not None:
             gt_cls = torch.unique(torch.cat(gt_cls, dim=0))
-            print(gt_cls)
             gt_cls = gt_cls[gt_cls != 255].to(self.device) # @TODO
 
         clip_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
@@ -203,9 +202,9 @@ class CATSeg(nn.Module):
     @torch.no_grad()
     def inference_sliding_window(self, batched_inputs, kernel=384, overlap=0.333, out_res=[640, 640]):
         images = [x["image"].to(self.device, dtype=torch.float32) for x in batched_inputs]
-        adjectives = [x["attributes_list"] for x in batched_inputs]
-        mapped_class_names = [x["mapped_class_names"] for x in batched_inputs]
-        original_class_names = [x["class_names"] for x in batched_inputs]
+        adjectives = [x.get("attributes_list", "") for x in batched_inputs]
+        mapped_class_names = [x.get("mapped_class_names", "") for x in batched_inputs]
+        original_class_names = [x.get("class_names", "") for x in batched_inputs]
         gt_cls = [x.get("sem_seg", "").to(self.device) for x in batched_inputs] if self.gt_classes else None
         if gt_cls is not None:
             gt_cls = torch.unique(torch.cat(gt_cls, dim=0))
