@@ -57,14 +57,10 @@ class CATSegPredictor(nn.Module):
             self.class_texts = json.load(f_in)
         with open(test_class_json, 'r') as f_in:
             self.test_class_texts = json.load(f_in)
-            
-        print(self.test_class_texts)
         assert self.class_texts != None
         if self.test_class_texts == None:
             self.test_class_texts = self.class_texts
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        #print(self.test_class_texts)
   
         self.tokenizer = None
         if clip_pretrained == "ViT-G" or clip_pretrained == "ViT-H":
@@ -94,9 +90,6 @@ class CATSegPredictor(nn.Module):
         
         self.prompt_templates = prompt_templates
         self.nlp = spacy.load("en_core_web_sm")
-
-        #self.text_features = self.class_embeddings(self.class_texts, prompt_templates, clip_model).permute(1, 0, 2).float()
-        #self.text_features_test = self.class_embeddings(self.test_class_texts, prompt_templates, clip_model).permute(1, 0, 2).float()
         
         self.clip_model = clip_model.float()
         self.clip_preprocess = clip_preprocess
@@ -158,13 +151,9 @@ class CATSegPredictor(nn.Module):
     def forward(self, x, vis_guidance, prompt=None, gt_cls=None, adjectives=None, mapped_class_names = None, original_class_names = None):
         vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
         text = self.class_texts if self.training else self.test_class_texts
-        #text = [text[c] for c in gt_cls] if gt_cls is not None else text
-        #print(text)
-        #text = text[gt_cls] if gt_cls is not None else text
-        
         text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt, adjectives, mapped_class_names, original_class_names)
-        text = text[gt_cls] if gt_cls is not None else text
-        text = text.repeat(x.shape[0], 1, 1, 1)
+        text = text.repeat(x.shape[0], 1, 1, 1) if x.shape[0] != text.shape[0] else text
+        text = text[:, gt_cls, :, :] if gt_cls is not None else text
         out = self.transformer(x, text, vis)
         
         if gt_cls is not None:
@@ -190,19 +179,12 @@ class CATSegPredictor(nn.Module):
                 for template in templates:
                     for cls_split in classname_splits:
                         texts.append(template.format(cls_split))
-                #print(texts)
             else:
                 texts = [template.format(classname) for template in templates]  # format with class
             if self.tokenizer is not None:
-                #print("tokenizer")
                 texts = self.tokenizer(texts).cuda()
-            else: 
-                #print("else")
+            else:
                 texts = clip.tokenize(texts)#,context_length=10, truncate=True)
-                
-                print(texts.shape)
-                print("else")
-                #print("text shape")
                 texts= texts.cuda()
             class_embeddings = clip_model.encode_text(texts)
             class_embeddings = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True)
@@ -250,60 +232,57 @@ class CATSegPredictor(nn.Module):
         # If mapped_class_names is None, return the original adjectives dictionary
         return adjectives
 
+    def get_text_embeds(self, classnames, templates, clip_model, prompt=None, adjectives=None, mapped_class_names=None,
+                        original_class_names=None):
+        B = len(adjectives) if adjectives is not None else 1
+        C = len(classnames)
 
-    
-    def get_text_embeds(self, classnames, templates, clip_model, prompt=None, adjectives=None, mapped_class_names = None, original_class_names = None):
+        if adjectives is not None and mapped_class_names is not None and original_class_names is not None:
+            for i in range(B):
+                adjectives[i] = self.adapt_adjectives(mapped_class_names[i], original_class_names[i], adjectives[i])
 
-        tokens = []
-        
-        if adjectives is not None and mapped_class_names is not None and original_class_names is not None: 
-            adjectives[0] = self.adapt_adjectives(mapped_class_names[0], original_class_names[0], adjectives[0])
-        # Process each classname
-        for classname in classnames:
-            #adjectives = adjectives[0]
-            if classname in adjectives[0]:
-                adjectives_per_class = adjectives[0][classname]
-                if len(adjectives_per_class):
-                    random_index = random.randint(0, len(adjectives_per_class) - 1)
-                    adjective = adjectives_per_class[random_index]
-                    #print(adjective)
-                    attribute_list = [adjective]
-                before_noun, after_noun = self.classify_attributes_with_spacy(attribute_list)
+        all_tokens = []
+        for i in range(B):
+            batch_tokens = []
+            for classname in classnames:
+                adj_desc_before, adj_desc_after = None, None
+                if adjectives is not None and classname in adjectives[i]:
+                    adjectives_per_class = adjectives[i][classname]
+                    if adjectives_per_class:
+                        adjective = random.choice(adjectives_per_class)
+                        attribute_list = [adjective]
+                        before_noun, after_noun = self.classify_attributes_with_spacy(attribute_list)
+                        adj_desc_before = " ".join(before_noun) if before_noun else None
+                        adj_desc_after = " ".join(after_noun) if after_noun else None
 
-                adj_desc_after = None
-                adj_desc_before = None
-                if len(before_noun):
-                    adj_desc_before = " ".join(before_noun)
-                if len(after_noun):
-                    adj_desc_after = " ".join(after_noun)
-            else:
-                adj_desc_before = None
-                adj_desc_after = None
-            ###!!!!!!!
-            #formatted_text = f"{adj_desc_before} {classname}" if adj_desc else classname
-            formatted_text = classname
+                formatted_text = classname
+                if adj_desc_before:
+                    formatted_text = f"{adj_desc_before} {formatted_text}"
+                if adj_desc_after:
+                    formatted_text = f"{formatted_text} {adj_desc_after}"
 
-            # Add adj_desc_before if it is not None
-            if adj_desc_before:
-                formatted_text = f"{adj_desc_before} {formatted_text}"
+                texts = [template.format(formatted_text) for template in templates]
+                if self.tokenizer is not None:
+                    texts = self.tokenizer(texts).cuda()
+                else:
+                    texts = clip.tokenize(texts).cuda()
+                batch_tokens.append(texts)
+            all_tokens.append(torch.stack(batch_tokens, dim=0).squeeze(1))
 
-            # Add adj_desc_after if it is not None
-            if adj_desc_after:
-                formatted_text = f"{formatted_text} {adj_desc_after}"
-                
-            #print("formatted_text")
-            #print(formatted_text)
-            texts = [template.format(formatted_text) for template in templates]
-            if self.tokenizer is not None:
-                texts = self.tokenizer(texts).cuda()
-            else:
-                texts = clip.tokenize(texts).cuda()
-            tokens.append(texts)
-        tokens = torch.stack(tokens, dim=0).squeeze(1)
+        if B > 1:
+            tokens = torch.stack(all_tokens, dim=0)
+        else:
+            tokens = all_tokens[0]
 
-        class_embeddings = clip_model.encode_text(tokens, prompt)
-        class_embeddings = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True)
-
-        class_embeddings = class_embeddings.unsqueeze(1)
-
-        return class_embeddings
+        if B == 1:
+            class_embeddings = clip_model.encode_text(tokens, prompt)
+            class_embeddings = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True)
+            return class_embeddings.unsqueeze(1)
+        else:
+            # Reshape tokens to (B*C, tokenizer_size)
+            tokens_reshaped = tokens.view(-1, tokens.size(-1))
+            class_embeddings = clip_model.encode_text(tokens_reshaped, prompt)
+            # Reshape back to (B, C, embed_dim)
+            class_embeddings = class_embeddings.view(B, C, -1)
+            class_embeddings = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True)
+            return class_embeddings.unsqueeze(2)
