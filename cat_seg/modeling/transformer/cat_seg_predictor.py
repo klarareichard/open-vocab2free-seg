@@ -152,10 +152,10 @@ class CATSegPredictor(nn.Module):
 
         return ret
 
-    def forward(self, x, vis_guidance, prompt=None, gt_cls=None, adjectives=None, mapped_class_names = None, original_class_names = None):
+    def forward(self, x, vis_guidance, prompt=None, gt_cls=None, adjectives=None, mapped_class_names = None, predicted_class_names = None):
         vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
         text = self.class_texts if self.training else self.test_class_texts
-        text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt, adjectives, mapped_class_names, original_class_names)
+        text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt, adjectives, mapped_class_names, predicted_class_names)
         text = text.repeat(x.shape[0], 1, 1, 1) if x.shape[0] != text.shape[0] else text
         text = text[:, gt_cls, :, :] if gt_cls is not None else text
         out = self.transformer(x, text, vis)
@@ -237,17 +237,16 @@ class CATSegPredictor(nn.Module):
         return adjectives
 
     def get_text_embeds(self, classnames, templates, clip_model, prompt=None, adjectives=None, mapped_class_names=None,
-                        original_class_names=None):
+                        predicted_class_names=None):
         B = len(adjectives) if adjectives is not None else 1
 
-        if adjectives is not None and mapped_class_names is not None and original_class_names is not None:
+        if adjectives is not None and mapped_class_names is not None and predicted_class_names is not None:
             for i in range(B):
-                adjectives[i] = self.adapt_adjectives(mapped_class_names[i], original_class_names[i], adjectives[i])
+                adjectives[i] = self.adapt_adjectives(mapped_class_names[i], predicted_class_names[i], adjectives[i])
+                predicted_class_names[i] = mapped_class_names[i] if mapped_class_names[i] is not None else predicted_class_names[i]
 
         if self.vocab_free:
-            # if type(original_class_names[0]) == 'str':
-
-            classnames = original_class_names[0]# [s.strip("'") for s in original_class_names[0].strip("[]").split(", ")]
+            classnames = predicted_class_names[0]# [s.strip("'") for s in predicted_class_names[0].strip("[]").split(", ")]
             classnames = [*{*classnames}]
             """
             classnames = [x for x in adjectives[0].keys()] # TODO: valid only for inference or num_gpus == batch_size
