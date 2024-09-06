@@ -12,7 +12,6 @@ from PIL import Image
 
 from .metrics import SemanticJaccardIndex, SemanticRecall
 
-
 class VocabFreeEvaluator(DatasetEvaluator):
     """
     Evaluate semantic segmentation metrics for Vocabulary Free pipeline.
@@ -28,15 +27,6 @@ class VocabFreeEvaluator(DatasetEvaluator):
             num_classes=None,
             ignore_label=None,
     ):
-        """
-        Args:
-            dataset_name (str): name of the dataset to be evaluated.
-            distributed (bool): if True, will collect results from all ranks for evaluation.
-                Otherwise, will evaluate the results in the current process.
-            output_dir (str): an output directory to dump results.
-            sem_seg_loading_fn: function to read sem seg file and load into numpy array.
-            num_classes, ignore_label: deprecated arguments
-        """
         self._logger = logging.getLogger(__name__)
         self._dataset_name = dataset_name
         self._distributed = distributed
@@ -53,57 +43,76 @@ class VocabFreeEvaluator(DatasetEvaluator):
         self._ignore_label = ignore_label if ignore_label is not None else meta.ignore_label
 
         # Initialize metrics on the correct device
-        self.jaccard_index = SemanticJaccardIndex(mode="soft", classes=self._class_names).to(self._device)
-        self.recall = SemanticRecall(mode="soft", classes=self._class_names).to(self._device)
+        self.hji = SemanticJaccardIndex(mode="hard", classes=self._class_names, ignore_label= self._ignore_label).to(self._device)
+        self.nji = SemanticJaccardIndex(mode="nearest", classes=self._class_names, ignore_label= self._ignore_label).to(self._device)
+        self.oji = SemanticJaccardIndex(mode="overlap", classes=self._class_names, ignore_label= self._ignore_label).to(self._device)
+        self.sji = SemanticJaccardIndex(mode="soft", classes=self._class_names, ignore_label= self._ignore_label).to(self._device)
+        self.hr = SemanticRecall(mode="hard", classes=self._class_names, ignore_label= self._ignore_label).to(self._device)
+        self.sr = SemanticRecall(mode="soft", classes=self._class_names, ignore_label= self._ignore_label).to(self._device)
 
     def reset(self):
-        self.jaccard_index.reset()
-        self.recall.reset()
+        self.hji.reset()
+        self.nji.reset()
+        self.oji.reset()
+        self.sji.reset()
+        self.hr.reset()
+        self.sr.reset()
 
     def process(self, inputs, outputs):
-        """
-        Args:
-            inputs: the inputs to a model.
-                It is a list of dicts. Each dict corresponds to an image and
-                contains keys like "height", "width", "file_name".
-            outputs: the outputs of a model. It is a list of dicts with key
-                "sem_seg" that contains semantic segmentation prediction.
-        """
         for input, output in zip(inputs, outputs):
-            pred_classes =  input["class_names"] # [s.strip("'") for s in input["class_names"].strip("[]").split(", ")]
+            pred_classes = input["class_names"]
             pred_classes = [*{*pred_classes}]
-            pred_mask = output["sem_seg"].cpu().numpy()#.to(self._device).
-            pred = [(pred_classes, pred_mask)]  # Wrap in list for batch of size 1
+            pred_mask = output["sem_seg"].cpu().numpy()
+            pred = [(pred_classes, pred_mask)]
 
             gt_filename = self.input_file_to_gt_file[input["file_name"]]
-            gt = self.load_gt_sem_seg(gt_filename)#torch.from_numpy(np.load(gt_filename)).to(self._device)  # Load and move to device
-            gt = [gt]  # Wrap in list for batch of size 1
+            gt = self.load_gt_sem_seg(gt_filename)
+            gt = [gt]
 
             # Update metrics
-            self.jaccard_index.update(pred, gt)
-            self.recall.update(pred, gt)
+            self.hji.update(pred, gt)
+            self.nji.update(pred, gt)
+            self.oji.update(pred, gt)
+            self.sji.update(pred, gt)
+            self.hr.update(pred, gt)
+            self.sr.update(pred, gt)
 
     def evaluate(self):
         if self._distributed:
             synchronize()
-            # Gather metric states from all processes
-            jaccard_index_state = all_gather(self.jaccard_index.state_dict())
-            recall_state = all_gather(self.recall.state_dict())
+            metric_states = all_gather({
+                'hji': self.hji.state_dict(),
+                'nji': self.nji.state_dict(),
+                'oji': self.oji.state_dict(),
+                'sji': self.sji.state_dict(),
+                'hr': self.hr.state_dict(),
+                'sr': self.sr.state_dict()
+            })
 
             if not is_main_process():
                 return
 
             # Combine metric states
-            self.jaccard_index.load_state_dict(self._combine_states(jaccard_index_state))
-            self.recall.load_state_dict(self._combine_states(recall_state))
+            for metric_name in ['hji', 'nji', 'oji', 'sji', 'hr', 'sr']:
+                getattr(self, metric_name).load_state_dict(
+                    self._combine_states([state[metric_name] for state in metric_states])
+                )
 
-        jaccard_index = self.jaccard_index.compute()
-        recall = self.recall.compute()
+        hji = self.hji.compute()
+        nji = self.nji.compute()
+        oji = self.oji.compute()
+        sji = self.sji.compute()
+        hr = self.hr.compute()
+        sr = self.sr.compute()
 
         res = OrderedDict()
         res["sem_seg"] = {
-            "mIoU": jaccard_index.item() * 100,
-            "Recall": recall.item() * 100,
+            "HJI": hji.item() * 100,
+            "NJI": nji.item() * 100,
+            "OJI": oji.item() * 100,
+            "SJI": sji.item() * 100,
+            "HR": hr.item() * 100,
+            "SR": sr.item() * 100,
         }
 
         if self._output_dir:
@@ -118,10 +127,6 @@ class VocabFreeEvaluator(DatasetEvaluator):
 
     @staticmethod
     def _combine_states(states):
-        """
-        Combine metric states from multiple processes.
-        This method should be implemented based on how your metric states are structured.
-        """
         combined = states[0].copy()
         for state in states[1:]:
             for k, v in state.items():
@@ -131,17 +136,6 @@ class VocabFreeEvaluator(DatasetEvaluator):
                     combined[k] += v
         return combined
 
-
-
     @staticmethod
     def load_gt_sem_seg(gt_filename: str) -> np.ndarray:
-        """
-        Load ground truth semantic segmentation mask.
-
-        Args:
-            gt_filename (str): Path to the ground truth semantic segmentation mask.
-
-        Returns:
-            np.ndarray: Ground truth semantic segmentation mask.
-        """
         return np.array(Image.open(gt_filename))

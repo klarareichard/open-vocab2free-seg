@@ -273,9 +273,11 @@ def register_ade20k_150(root):
         if not seen:
             extra_classes.append(category)
     meta.update({"val_extra_classes": extra_classes})
+    predicted_class_path = "ram_predicted_class_names_ade_all_tags.json"
     for name, image_dirname, sem_seg_dirname, attributes_list_file in [
         ("test", "images/validation", "annotations_detectron2/validation",
-            "ram_predicted_class_names_ade_all_tags.json"),
+            predicted_class_path),
+            #"ram_predicted_class_names_ade_all_tags.json"),
             #"llava-1.6-predicted_classes_ade_validation_remapped_with_llava_embed.json"),
          #"llava-1.6-gt_classes_predicted_adj_ade_val.json"),
     ]:

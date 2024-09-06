@@ -548,7 +548,6 @@ class Trainer(DefaultTrainer):
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
         if cfg.VOCAB_FREE:
             # Use semantic metrics for vocabulary-free evaluation
-            # classes = MetadataCatalog.get(dataset_name).stuff_classes
             evaluator_list.append(
                 VocabFreeEvaluator(
                     dataset_name,
