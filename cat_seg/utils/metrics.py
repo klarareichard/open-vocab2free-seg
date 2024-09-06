@@ -187,10 +187,11 @@ class SemanticHardJaccardIndex(MulticlassJaccardIndex):
 
 
 class SemanticSoftJaccardIndex(Metric):
-    def __init__(self, *args, classes: List[str], average: str = "micro", **kwargs) -> None:
+    def __init__(self, *args, classes: List[str], average: str = "micro", ignore_index=255, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         assert average in ["micro", "macro"]
         self.classes = classes
+        self.ignore_index = ignore_index
         self.average = average
         self.encoder = SentenceBERT()
         classes_z = self.encoder(classes)

@@ -43,12 +43,12 @@ class VocabFreeEvaluator(DatasetEvaluator):
         self._ignore_label = ignore_label if ignore_label is not None else meta.ignore_label
 
         # Initialize metrics on the correct device
-        self.hji = SemanticJaccardIndex(mode="hard", classes=self._class_names, ignore_label= self._ignore_label).to(self._device)
-        self.nji = SemanticJaccardIndex(mode="nearest", classes=self._class_names, ignore_label= self._ignore_label).to(self._device)
-        self.oji = SemanticJaccardIndex(mode="overlap", classes=self._class_names, ignore_label= self._ignore_label).to(self._device)
-        self.sji = SemanticJaccardIndex(mode="soft", classes=self._class_names, ignore_label= self._ignore_label).to(self._device)
-        self.hr = SemanticRecall(mode="hard", classes=self._class_names, ignore_label= self._ignore_label).to(self._device)
-        self.sr = SemanticRecall(mode="soft", classes=self._class_names, ignore_label= self._ignore_label).to(self._device)
+        self.hji = SemanticJaccardIndex(mode="hard", classes=self._class_names, ignore_index= self._ignore_label).to(self._device)
+        self.nji = SemanticJaccardIndex(mode="nearest", classes=self._class_names, ignore_index= self._ignore_label).to(self._device)
+        self.oji = SemanticJaccardIndex(mode="overlap", classes=self._class_names, ignore_index= self._ignore_label).to(self._device)
+        self.sji = SemanticJaccardIndex(mode="soft", classes=self._class_names, ignore_index= self._ignore_label).to(self._device)
+        self.hr = SemanticRecall(mode="hard", classes=self._class_names, ignore_index= self._ignore_label).to(self._device)
+        self.sr = SemanticRecall(mode="soft", classes=self._class_names, ignore_index= self._ignore_label).to(self._device)
 
     def reset(self):
         self.hji.reset()
