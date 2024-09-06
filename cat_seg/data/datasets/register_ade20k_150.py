@@ -181,12 +181,30 @@ COCO_CATEGORIES = [
 
 
 def _get_ade20k_150_meta():
-    ade20k_150_classes = ["wall", "building", "sky", "floor", "tree", "ceiling", "road", "bed ", "windowpane", "grass", "cabinet", "sidewalk", "person", "earth", "door", "table", "mountain", "plant", "curtain", "chair", "car", "water", "painting", "sofa", "shelf", "house", "sea", "mirror", "rug", "field", "armchair", "seat", "fence", "desk", "rock", "wardrobe", "lamp", "bathtub", "railing", "cushion", "base", "box", "column", "signboard", "chest of drawers", "counter", "sand", "sink", "skyscraper", "fireplace", "refrigerator", "grandstand", "path", "stairs", "runway", "case", "pool table", "pillow", "screen door", "stairway", "river", "bridge", "bookcase", "blind", "coffee table", "toilet", "flower", "book", "hill", "bench", "countertop", "stove", "palm", "kitchen island", "computer", "swivel chair", "boat", "bar", "arcade machine", "hovel", "bus", "towel", "light", "truck", "tower", "chandelier", "awning", "streetlight", "booth", "television receiver", "airplane", "dirt track", "apparel", "pole", "land", "bannister", "escalator", "ottoman", "bottle", "buffet", "poster", "stage", "van", "ship", "fountain", "conveyer belt", "canopy", "washer", "plaything", "swimming pool", "stool", "barrel", "basket", "waterfall", "tent", "bag", "minibike", "cradle", "oven", "ball", "food", "step", "tank", "trade name", "microwave", "pot", "animal", "bicycle", "lake", "dishwasher", "screen", "blanket", "sculpture", "hood", "sconce", "vase", "traffic light", "tray", "ashcan", "fan", "pier", "crt screen", "plate", "monitor", "bulletin board", "shower", "radiator", "glass", "clock", "flag"]
+    ade20k_150_classes = ["wall", "building", "sky", "floor", "tree", "ceiling", "road", "bed ", "windowpane", "grass",
+                          "cabinet", "sidewalk", "person", "earth", "door", "table", "mountain", "plant", "curtain",
+                          "chair", "car", "water", "painting", "sofa", "shelf", "house", "sea", "mirror", "rug",
+                          "field", "armchair", "seat", "fence", "desk", "rock", "wardrobe", "lamp", "bathtub",
+                          "railing", "cushion", "base", "box", "column", "signboard", "chest of drawers", "counter",
+                          "sand", "sink", "skyscraper", "fireplace", "refrigerator", "grandstand", "path", "stairs",
+                          "runway", "case", "pool table", "pillow", "screen door", "stairway", "river", "bridge",
+                          "bookcase", "blind", "coffee table", "toilet", "flower", "book", "hill", "bench",
+                          "countertop", "stove", "palm", "kitchen island", "computer", "swivel chair", "boat", "bar",
+                          "arcade machine", "hovel", "bus", "towel", "light", "truck", "tower", "chandelier", "awning",
+                          "streetlight", "booth", "television receiver", "airplane", "dirt track", "apparel", "pole",
+                          "land", "bannister", "escalator", "ottoman", "bottle", "buffet", "poster", "stage", "van",
+                          "ship", "fountain", "conveyer belt", "canopy", "washer", "plaything", "swimming pool",
+                          "stool", "barrel", "basket", "waterfall", "tent", "bag", "minibike", "cradle", "oven", "ball",
+                          "food", "step", "tank", "trade name", "microwave", "pot", "animal", "bicycle", "lake",
+                          "dishwasher", "screen", "blanket", "sculpture", "hood", "sconce", "vase", "traffic light",
+                          "tray", "ashcan", "fan", "pier", "crt screen", "plate", "monitor", "bulletin board", "shower",
+                          "radiator", "glass", "clock", "flag"]
 
     ret = {
-        "stuff_classes" : ade20k_150_classes,
+        "stuff_classes": ade20k_150_classes,
     }
     return ret
+
 
 def extract_image_id(file_name):
     # Extract the filename from the full path
@@ -195,59 +213,54 @@ def extract_image_id(file_name):
     # Remove the file extension
     name_without_ext = os.path.splitext(base_name)[0]
     name_without_ = name_without_ext.split("_")[-1]
-    # print(name_without_)
     # Return the image ID
     return int(name_without_.lstrip('0'))
 
+
 def load_ade_with_attributes(image_dir, gt_dir, adjectives_file):
     dataset_dicts = load_sem_seg(image_dir, gt_dir, gt_ext="png", image_ext="jpg")
-    print(adjectives_file)
     with open(adjectives_file, 'r') as f:
         adjectives_data = json.load(f)
 
     adjectives = {}
     class_names = {}
     mapped_class_names = {}
-    index = 0
-    print(len(adjectives_data))
     for data in adjectives_data:
         file_name = data["file_name"]
         image_id = extract_image_id(file_name)
         data["image_id"] = image_id
-        #if index < 11:
-            #print(type(image_id))
-        
-        adjectives_dict = data['attributes_list']
-        
-        
-       
+
+        if "attribute_list" in data:
+            adjectives_dict = data['attributes_list']
+        else:
+            adjectives_dict = None
+
         class_name = data['class_names']
-        
-        mapped_class_name = data['mapped_class_names']
+
+        if "mapped_class_names" in data:
+            mapped_class_name = data['mapped_class_names']
+        else:
+            mapped_class_name = None
 
         adjectives[image_id] = adjectives_dict
         class_names[image_id] = class_name
         mapped_class_names[image_id] = mapped_class_name
-        
 
-    # print(captions_data.keys())
-
-    index = 0
-    print(len(dataset_dicts))
     for dataset_dict in dataset_dicts:
         file_name = dataset_dict["file_name"]
         image_id = extract_image_id(file_name)
         dataset_dict["image_id"] = image_id
-        
-        #if image_id in adjectives:
-        dataset_dict["attributes_list"] = adjectives[image_id]
-        
-       # if image_id in class_names:
-        dataset_dict["class_names"] = class_names[image_id]
-        dataset_dict["mapped_class_names"] = mapped_class_names[image_id]
-        
+
+        if image_id in adjectives:
+            dataset_dict["attributes_list"] = adjectives[image_id]
+
+        if image_id in class_names:
+            dataset_dict["class_names"] = class_names[image_id]
+            dataset_dict["mapped_class_names"] = mapped_class_names[image_id]
 
     return dataset_dicts
+
+
 def register_ade20k_150(root):
     root = os.path.join(root, "ADEChallengeData2016")
     meta = _get_ade20k_150_meta()
@@ -260,21 +273,23 @@ def register_ade20k_150(root):
         if not seen:
             extra_classes.append(category)
     meta.update({"val_extra_classes": extra_classes})
-    print("extra_classes")
-    print(extra_classes)
     for name, image_dirname, sem_seg_dirname, attributes_list_file in [
-        ("test", "images/validation", "annotations_detectron2/validation", 
-         "llava-1.6-predicted_classes_ade_validation_right_remapped.json"),
-         #"llava-1.6-gt_classes_predicted_adj_ade_val.json"),#"llava-1.6-predicted_classes_ade_validation_right.json" ),
+        ("test", "images/validation", "annotations_detectron2/validation",
+            "ram_predicted_class_names_ade_all_tags.json"),
+            #"llava-1.6-predicted_classes_ade_validation_remapped_with_llava_embed.json"),
+         #"llava-1.6-gt_classes_predicted_adj_ade_val.json"),
     ]:
         image_dir = os.path.join(root, image_dirname)
         gt_dir = os.path.join(root, sem_seg_dirname)
         attributes_list = os.path.join(root, attributes_list_file)
         name = f"ade20k_150_{name}_sem_seg"
         DatasetCatalog.register(
-            name, lambda x=image_dir, y=gt_dir: load_ade_with_attributes(y, x, attributes_list) #gt_ext="png", image_ext="jpg")
+            name, lambda x=image_dir, y=gt_dir: load_ade_with_attributes(y, x, attributes_list)
+            # gt_ext="png", image_ext="jpg")
         )
-        MetadataCatalog.get(name).set(image_root=image_dir, seg_seg_root=gt_dir, evaluator_type="sem_seg", ignore_label=255, **meta,)
+        MetadataCatalog.get(name).set(image_root=image_dir, seg_seg_root=gt_dir, evaluator_type="sem_seg",
+                                      ignore_label=255, **meta, )
 
-_root = os.getenv("DETECTRON2_DATASETS", "datasets")
+
+_root = os.getenv("DETECTRON2_DATASETS", "/media/lttm/lttm_nas/datasets")
 register_ade20k_150(_root)

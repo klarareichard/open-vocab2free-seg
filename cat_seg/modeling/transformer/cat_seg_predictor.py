@@ -44,6 +44,7 @@ class CATSegPredictor(nn.Module):
         feature_resolution: tuple,
         window_sizes: tuple,
         attention_type: str,
+        vocab_free: str = False,
     ):
         """
         Args:
@@ -115,6 +116,7 @@ class CATSegPredictor(nn.Module):
         
         self.tokens = None
         self.cache = None
+        self.vocab_free = vocab_free
 
     @classmethod
     def from_config(cls, cfg):#, in_channels, mask_classification):
@@ -145,6 +147,8 @@ class CATSegPredictor(nn.Module):
         ret["feature_resolution"] = cfg.MODEL.SEM_SEG_HEAD.FEATURE_RESOLUTION
         ret["window_sizes"] = cfg.MODEL.SEM_SEG_HEAD.WINDOW_SIZES
         ret["attention_type"] = cfg.MODEL.SEM_SEG_HEAD.ATTENTION_TYPE
+
+        ret["vocab_free"] = cfg.VOCAB_FREE
 
         return ret
 
@@ -235,18 +239,30 @@ class CATSegPredictor(nn.Module):
     def get_text_embeds(self, classnames, templates, clip_model, prompt=None, adjectives=None, mapped_class_names=None,
                         original_class_names=None):
         B = len(adjectives) if adjectives is not None else 1
-        C = len(classnames)
 
         if adjectives is not None and mapped_class_names is not None and original_class_names is not None:
             for i in range(B):
                 adjectives[i] = self.adapt_adjectives(mapped_class_names[i], original_class_names[i], adjectives[i])
+
+        if self.vocab_free:
+            # if type(original_class_names[0]) == 'str':
+
+            classnames = original_class_names[0]# [s.strip("'") for s in original_class_names[0].strip("[]").split(", ")]
+            classnames = [*{*classnames}]
+            """
+            classnames = [x for x in adjectives[0].keys()] # TODO: valid only for inference or num_gpus == batch_size
+            if classnames == []:
+                a = 1
+            """
+
+        C = len(classnames)
 
         all_tokens = []
         for i in range(B):
             batch_tokens = []
             for classname in classnames:
                 adj_desc_before, adj_desc_after = None, None
-                if adjectives is not None and classname in adjectives[i]:
+                if adjectives is not None and adjectives[i] is not None and classname in adjectives[i]:
                     adjectives_per_class = adjectives[i][classname]
                     if adjectives_per_class:
                         adjective = random.choice(adjectives_per_class)
@@ -274,7 +290,7 @@ class CATSegPredictor(nn.Module):
         else:
             tokens = all_tokens[0]
 
-        if B == 1:
+        if adjectives is None:
             class_embeddings = clip_model.encode_text(tokens, prompt)
             class_embeddings = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True)
             return class_embeddings.unsqueeze(1)

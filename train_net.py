@@ -507,7 +507,7 @@ from cat_seg import (
     MaskFormerPanopticDatasetMapper,
     MaskFormerSemanticDatasetMapper,
     SemanticSegmentorWithTTA,
-    add_cat_seg_config,
+    add_cat_seg_config, VocabFreeEvaluator,
 )
 
 class GradientCheckHook(HookBase):
@@ -546,46 +546,57 @@ class Trainer(DefaultTrainer):
             output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
         evaluator_list = []
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
-        if evaluator_type in ["sem_seg", "ade20k_panoptic_seg"]:
+        if cfg.VOCAB_FREE:
+            # Use semantic metrics for vocabulary-free evaluation
+            # classes = MetadataCatalog.get(dataset_name).stuff_classes
             evaluator_list.append(
-                SemSegImagesEvaluator(
+                VocabFreeEvaluator(
                     dataset_name,
                     distributed=True,
                     output_dir=output_folder
                 )
             )
-
-        if evaluator_type == "sem_seg_background":
-            evaluator_list.append(
-                VOCbEvaluator(
-                    dataset_name,
-                    distributed=True,
-                    output_dir=output_folder,
+        else:
+            if evaluator_type in ["sem_seg", "ade20k_panoptic_seg"]:
+                evaluator_list.append(
+                    SemSegImagesEvaluator(
+                        dataset_name,
+                        distributed=True,
+                        output_dir=output_folder
+                    )
                 )
-            )
-        if evaluator_type == "coco":
-            evaluator_list.append(COCOEvaluator(dataset_name, output_dir=output_folder))
-        if evaluator_type in [
-            "coco_panoptic_seg",
-            "ade20k_panoptic_seg",
-            "cityscapes_panoptic_seg",
-        ]:
-            evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))
-        if evaluator_type == "cityscapes_instance":
-            assert (
-                torch.cuda.device_count() >= comm.get_rank()
-            ), "CityscapesEvaluator currently do not work with multiple machines."
-            return CityscapesInstanceEvaluator(dataset_name)
-        if evaluator_type == "cityscapes_sem_seg":
-            assert (
-                torch.cuda.device_count() >= comm.get_rank()
-            ), "CityscapesEvaluator currently do not work with multiple machines."
-            return CityscapesSemSegEvaluator(dataset_name, output_folder)
-        if evaluator_type == "cityscapes_panoptic_seg":
-            assert (
-                torch.cuda.device_count() >= comm.get_rank()
-            ), "CityscapesEvaluator currently do not work with multiple machines."
-            evaluator_list.append(CityscapesSemSegEvaluator(dataset_name))
+
+            if evaluator_type == "sem_seg_background":
+                evaluator_list.append(
+                    VOCbEvaluator(
+                        dataset_name,
+                        distributed=True,
+                        output_dir=output_folder,
+                    )
+                )
+            if evaluator_type == "coco":
+                evaluator_list.append(COCOEvaluator(dataset_name, output_dir=output_folder))
+            if evaluator_type in [
+                "coco_panoptic_seg",
+                "ade20k_panoptic_seg",
+                "cityscapes_panoptic_seg",
+            ]:
+                evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))
+            if evaluator_type == "cityscapes_instance":
+                assert (
+                    torch.cuda.device_count() >= comm.get_rank()
+                ), "CityscapesEvaluator currently do not work with multiple machines."
+                return CityscapesInstanceEvaluator(dataset_name)
+            if evaluator_type == "cityscapes_sem_seg":
+                assert (
+                    torch.cuda.device_count() >= comm.get_rank()
+                ), "CityscapesEvaluator currently do not work with multiple machines."
+                return CityscapesSemSegEvaluator(dataset_name, output_folder)
+            if evaluator_type == "cityscapes_panoptic_seg":
+                assert (
+                    torch.cuda.device_count() >= comm.get_rank()
+                ), "CityscapesEvaluator currently do not work with multiple machines."
+                evaluator_list.append(CityscapesSemSegEvaluator(dataset_name))
         if len(evaluator_list) == 0:
             raise NotImplementedError(
                 "no Evaluator for the dataset {} with the type {}".format(

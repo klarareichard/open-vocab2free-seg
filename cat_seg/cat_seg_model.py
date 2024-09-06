@@ -152,7 +152,7 @@ class CATSeg(nn.Module):
         gt_cls = [x.get("sem_seg", "") for x in batched_inputs] if self.gt_classes else None
         if gt_cls is not None:
             gt_cls = torch.unique(torch.cat(gt_cls, dim=0))
-            gt_cls = gt_cls[gt_cls != 255].to(self.device) # @TODO
+            gt_cls = gt_cls[gt_cls != self.sem_seg_head.ignore_value].to(self.device) # @TODO
 
         clip_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
         clip_images = ImageList.from_tensors(clip_images, self.size_divisibility)
@@ -208,7 +208,7 @@ class CATSeg(nn.Module):
         gt_cls = [x.get("sem_seg", "").to(self.device) for x in batched_inputs] if self.gt_classes else None
         if gt_cls is not None:
             gt_cls = torch.unique(torch.cat(gt_cls, dim=0))
-            gt_cls = gt_cls[gt_cls != 255].to(self.device) # @TODO
+            gt_cls = gt_cls[gt_cls != self.sem_seg_head.ignore_value].to(self.device)
 
 
         stride = int(kernel * (1 - overlap))
