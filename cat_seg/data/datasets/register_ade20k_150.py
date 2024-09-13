@@ -230,7 +230,7 @@ def load_ade_with_attributes(image_dir, gt_dir, adjectives_file):
         image_id = extract_image_id(file_name)
         data["image_id"] = image_id
 
-        if "attribute_list" in data:
+        if "attributes_list" in data:
             adjectives_dict = data['attributes_list']
         else:
             adjectives_dict = None
@@ -273,7 +273,12 @@ def register_ade20k_150(root):
         if not seen:
             extra_classes.append(category)
     meta.update({"val_extra_classes": extra_classes})
-    predicted_class_path = "ram_predicted_class_names_ade_all_tags.json"
+    # VOCAB-FREE: ram_predicted_class_names_ade_all_tags.json #
+    # OPEN-VOCAB: ram_plus_class_names_ade_only_ade_tags.json
+    # VOCAB-FREE + adj: ram_predicted_class_names_ade_val_vocab_free.json
+    # GT + adj: llava-1.6-gt_classes_predicted_adj_ade_val.json
+    # Llava + adj: ram_plus_class_names_ade_only_ade_tags.json #llava-1.6-predicted_classes_adjectives_ade_validation_fixed.json
+    predicted_class_path = "ram_predicted_class_names_ade_val_vocab_free.json" #"ram_predicted_class_names_ade_val_vocab_free.json"#"llava-1.6-predicted_classes_ade_validation_right_fixed.json"#"llava-1.6-gt_classes_predicted_adj_ade_val.json" #"ram_plus_class_names_ade_only_ade_tags.json" # "ram_predicted_class_names_ade_all_tags.json"
     for name, image_dirname, sem_seg_dirname, attributes_list_file in [
         ("test", "images/validation", "annotations_detectron2/validation",
             predicted_class_path),

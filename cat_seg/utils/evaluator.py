@@ -12,6 +12,7 @@ from PIL import Image
 
 from .metrics import SemanticJaccardIndex, SemanticRecall
 
+
 class VocabFreeEvaluator(DatasetEvaluator):
     """
     Evaluate semantic segmentation metrics for Vocabulary Free pipeline.
@@ -43,20 +44,25 @@ class VocabFreeEvaluator(DatasetEvaluator):
         self._ignore_label = ignore_label if ignore_label is not None else meta.ignore_label
 
         # Initialize metrics on the correct device
-        self.hji = SemanticJaccardIndex(mode="hard", classes=self._class_names, ignore_index= self._ignore_label).to(self._device)
-        self.nji = SemanticJaccardIndex(mode="nearest", classes=self._class_names, ignore_index= self._ignore_label).to(self._device)
-        self.oji = SemanticJaccardIndex(mode="overlap", classes=self._class_names, ignore_index= self._ignore_label).to(self._device)
-        self.sji = SemanticJaccardIndex(mode="soft", classes=self._class_names, ignore_index= self._ignore_label).to(self._device)
-        self.hr = SemanticRecall(mode="hard", classes=self._class_names, ignore_index= self._ignore_label).to(self._device)
-        self.sr = SemanticRecall(mode="soft", classes=self._class_names, ignore_index= self._ignore_label).to(self._device)
+        self.hji = SemanticJaccardIndex(mode="hard", classes=self._class_names, ignore_index=self._ignore_label).to(
+            self._device)
+        self.sji = SemanticJaccardIndex(mode="soft", classes=self._class_names, ignore_index=self._ignore_label).to(
+            self._device)
+        self.hr = SemanticRecall(mode="hard", classes=self._class_names, ignore_index=self._ignore_label).to(
+            self._device)
+        self.sr = SemanticRecall(mode="soft", classes=self._class_names, ignore_index=self._ignore_label).to(
+            self._device)
+
+        # New HJI for mapped classes
+        self.mapped_hji = SemanticJaccardIndex(mode="hard", classes=self._class_names,
+                                               ignore_index=self._ignore_label).to(self._device)
 
     def reset(self):
         self.hji.reset()
-        self.nji.reset()
-        self.oji.reset()
         self.sji.reset()
         self.hr.reset()
         self.sr.reset()
+        self.mapped_hji.reset()
 
     def process(self, inputs, outputs):
         for input, output in zip(inputs, outputs):
@@ -65,52 +71,55 @@ class VocabFreeEvaluator(DatasetEvaluator):
             pred_mask = output["sem_seg"].cpu().numpy()
             pred = [(pred_classes, pred_mask)]
 
+            mapped_classes = input.get("mapped_class_names", "")
+            if mapped_classes:
+                map_pred = [(mapped_classes, pred_mask)]
+
             gt_filename = self.input_file_to_gt_file[input["file_name"]]
             gt = self.load_gt_sem_seg(gt_filename)
             gt = [gt]
 
             # Update metrics
             self.hji.update(pred, gt)
-            self.nji.update(pred, gt)
-            self.oji.update(pred, gt)
-            self.sji.update(pred, gt)
             self.hr.update(pred, gt)
             self.sr.update(pred, gt)
+
+            # Update SJI based on the presence of mapped classes
+            if mapped_classes:
+                self.mapped_hji.update(map_pred, gt)
+            else:
+                self.sji.update(pred, gt)
 
     def evaluate(self):
         if self._distributed:
             synchronize()
             metric_states = all_gather({
                 'hji': self.hji.state_dict(),
-                'nji': self.nji.state_dict(),
-                'oji': self.oji.state_dict(),
                 'sji': self.sji.state_dict(),
                 'hr': self.hr.state_dict(),
-                'sr': self.sr.state_dict()
+                'sr': self.sr.state_dict(),
+                'mapped_hji': self.mapped_hji.state_dict()
             })
 
             if not is_main_process():
                 return
 
             # Combine metric states
-            for metric_name in ['hji', 'nji', 'oji', 'sji', 'hr', 'sr']:
+            for metric_name in ['hji', 'sji', 'hr', 'sr', 'mapped_hji']:
                 getattr(self, metric_name).load_state_dict(
                     self._combine_states([state[metric_name] for state in metric_states])
                 )
 
         hji = self.hji.compute()
-        nji = self.nji.compute()
-        oji = self.oji.compute()
         sji = self.sji.compute()
         hr = self.hr.compute()
         sr = self.sr.compute()
+        mapped_hji = self.mapped_hji.compute()
 
         res = OrderedDict()
         res["sem_seg"] = {
             "HJI": hji.item() * 100,
-            "NJI": nji.item() * 100,
-            "OJI": oji.item() * 100,
-            "SJI": sji.item() * 100,
+            "SJI": mapped_hji.item() * 100 if mapped_hji.item() != 0 else sji.item() * 100,
             "HR": hr.item() * 100,
             "SR": sr.item() * 100,
         }

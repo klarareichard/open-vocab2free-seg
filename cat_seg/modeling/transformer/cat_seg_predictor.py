@@ -240,13 +240,15 @@ class CATSegPredictor(nn.Module):
                         predicted_class_names=None):
         B = len(adjectives) if adjectives is not None else 1
 
+        """
         if adjectives is not None and mapped_class_names is not None and predicted_class_names is not None:
             for i in range(B):
                 adjectives[i] = self.adapt_adjectives(mapped_class_names[i], predicted_class_names[i], adjectives[i])
                 predicted_class_names[i] = mapped_class_names[i] if mapped_class_names[i] is not None else predicted_class_names[i]
-
+        """
         if self.vocab_free:
             classnames = predicted_class_names[0]# [s.strip("'") for s in predicted_class_names[0].strip("[]").split(", ")]
+            #classnames = [s.strip("'") for s in predicted_class_names[0].strip("[]").split(", ")]
             classnames = [*{*classnames}]
             """
             classnames = [x for x in adjectives[0].keys()] # TODO: valid only for inference or num_gpus == batch_size
@@ -275,8 +277,10 @@ class CATSegPredictor(nn.Module):
                     formatted_text = f"{adj_desc_before} {formatted_text}"
                 if adj_desc_after:
                     formatted_text = f"{formatted_text} {adj_desc_after}"
+                print(formatted_text)
 
                 texts = [template.format(formatted_text) for template in templates]
+                #print(texts)
                 if self.tokenizer is not None:
                     texts = self.tokenizer(texts).cuda()
                 else:

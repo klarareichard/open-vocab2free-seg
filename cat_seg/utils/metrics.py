@@ -96,9 +96,7 @@ class SemanticClusterJaccardIndex(Metric):
                 co_occurrences = torch.bincount(
                     v * matrix_size[1] + t, minlength=matrix_size[0] * matrix_size[1]
                 ).view(matrix_size)
-                new_value_mask = torch.full_like(value_mask, fill_value=self.ignore_index)
-                new_value_mask[target != self.ignore_index] = co_occurrences.argmax(dim=-1)[value_mask[target != self.ignore_index]]
-                value_mask = new_value_mask
+                value_mask[target != self.ignore_index] = co_occurrences.argmax(dim=-1)[value_mask[target != self.ignore_index]]
             elif self.match == "nearest":
                 # Compute the text similarity between the predictions and the labels
                 value_names_z = self.encoder(names).to(self.device)
@@ -210,14 +208,14 @@ class SemanticSoftJaccardIndex(Metric):
         for value, target in zip(values, targets):
             names, value_mask = value
             target = torch.tensor(target, device=self.device)
-            value_mask = torch.tensor(value_mask, dtype=torch.float, device=self.device)
+            value_mask = torch.tensor(value_mask, dtype=torch.float, device=self.device).unsqueeze(0)
 
             # Ensure value_mask has the same spatial dimensions as target
             if value_mask.shape[-2:] != target.shape[-2:]:
                 value_mask = F.interpolate(
                     value_mask.unsqueeze(0), size=target.shape[-2:], mode="bilinear", align_corners=False
                 ).squeeze(0)
-            value_mask = value_mask.argmax(dim=0)
+            value_mask = value_mask.argmax(dim=1).squeeze(0)
 
             # Compute the text similarity between the predictions and the labels
             value_names_z = self.encoder(names).to(self.device)
@@ -234,16 +232,17 @@ class SemanticSoftJaccardIndex(Metric):
             for i, idx in enumerate(cls_idx):
 
                 mask = target == idx
+                non_mask = target != self.ignore_index
 
-                intersection = torch.sum(value_scores[i][mask])
-                union = torch.sum(value_scores[i]) + torch.sum(mask) - intersection
+                intersection = torch.sum(value_scores[i][mask * non_mask])
+                union = torch.sum(value_scores[i][non_mask]) + torch.sum(mask) - intersection
 
                 intersections.append(intersection)
                 unions.append(union)
                 target_idxs.append(idx)
 
-        intersections = torch.stack(intersections)
-        unions = torch.stack(unions)
+        intersections = torch.tensor(intersections, device=self.device)
+        unions = torch.tensor(unions, device=self.device)
         target_idxs = torch.tensor(target_idxs, device=self.device)
 
         self.intersection = torch.cat([self.intersection, intersections])
