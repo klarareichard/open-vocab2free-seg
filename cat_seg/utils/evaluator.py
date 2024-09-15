@@ -67,7 +67,8 @@ class VocabFreeEvaluator(DatasetEvaluator):
     def process(self, inputs, outputs):
         for input, output in zip(inputs, outputs):
             pred_classes = input["class_names"]
-            pred_classes = [*{*pred_classes}]
+            # pred_classes = [s.strip("'") for s in pred_classes.strip("[]").split(", ")]
+            #pred_classes = [*{*pred_classes}]
             pred_mask = output["sem_seg"].cpu().numpy()
             pred = [(pred_classes, pred_mask)]
 

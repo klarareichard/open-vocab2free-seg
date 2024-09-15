@@ -206,6 +206,7 @@ class CATSeg(nn.Module):
         mapped_class_names = [x.get("mapped_class_names", "") for x in batched_inputs]
         predicted_class_names = [x.get("class_names", "") for x in batched_inputs]
         gt_cls = [x.get("sem_seg", "").to(self.device) for x in batched_inputs] if self.gt_classes else None
+        print([x.get("file_name", "") for x in batched_inputs])
         if gt_cls is not None:
             gt_cls = torch.unique(torch.cat(gt_cls, dim=0))
             gt_cls = gt_cls[gt_cls != self.sem_seg_head.ignore_value].to(self.device)

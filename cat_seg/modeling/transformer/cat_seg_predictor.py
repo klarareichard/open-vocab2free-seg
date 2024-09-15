@@ -248,8 +248,8 @@ class CATSegPredictor(nn.Module):
         """
         if self.vocab_free:
             classnames = predicted_class_names[0]# [s.strip("'") for s in predicted_class_names[0].strip("[]").split(", ")]
-            #classnames = [s.strip("'") for s in predicted_class_names[0].strip("[]").split(", ")]
-            classnames = [*{*classnames}]
+            # classnames = [s.strip("'") for s in predicted_class_names[0].strip("[]").split(", ")]
+            #classnames = [*{*classnames}]
             """
             classnames = [x for x in adjectives[0].keys()] # TODO: valid only for inference or num_gpus == batch_size
             if classnames == []:

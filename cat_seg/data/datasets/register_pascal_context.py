@@ -245,14 +245,19 @@ def load_pc_59_with_attributes(image_dir, gt_dir, adjectives_file):
         data["image_id"] = image_id
         #if index < 11:
             #print(type(image_id))
-        
-        adjectives_dict = data['attributes_list']
-        
+
+        if "attributes_list" in data:
+            adjectives_dict = data['attributes_list']
+        else:
+            adjectives_dict = None
         
        
         class_name = data['class_names']
-        
-        mapped_class_name = data['mapped_class_names']
+
+        if "mapped_class_names" in data:
+            mapped_class_name = data['mapped_class_names']
+        else:
+            mapped_class_name = None
 
         adjectives[image_id] = adjectives_dict
         class_names[image_id] = class_name
@@ -269,11 +274,67 @@ def load_pc_59_with_attributes(image_dir, gt_dir, adjectives_file):
         dataset_dict["image_id"] = image_id
         
         #if image_id in adjectives:
-        dataset_dict["attributes_list"] = adjectives[image_id]
+        if image_id in adjectives:
+            dataset_dict["attributes_list"] = adjectives[image_id]
         
        # if image_id in class_names:
-        dataset_dict["class_names"] = class_names[image_id]
-        dataset_dict["mapped_class_names"] = mapped_class_names[image_id]
+        if image_id in class_names:
+            dataset_dict["class_names"] = class_names[image_id]
+            dataset_dict["mapped_class_names"] = mapped_class_names[image_id]
+    return dataset_dicts
+
+def load_pc_459_with_attributes(image_dir, gt_dir, adjectives_file):
+    dataset_dicts = load_sem_seg(image_dir, gt_dir, gt_ext="tif", image_ext="jpg")
+    print(adjectives_file)
+    with open(adjectives_file, 'r') as f:
+        adjectives_data = json.load(f)
+
+    adjectives = {}
+    class_names = {}
+    mapped_class_names = {}
+    index = 0
+    print(len(adjectives_data))
+    for data in adjectives_data:
+        file_name = data["file_name"]
+        image_id = extract_image_id(file_name)
+        data["image_id"] = image_id
+        # if index < 11:
+        # print(type(image_id))
+
+        if "attributes_list" in data:
+            adjectives_dict = data['attributes_list']
+        else:
+            adjectives_dict = None
+
+        class_name = data['class_names']
+
+        if "mapped_class_names" in data:
+            mapped_class_name = data['mapped_class_names']
+        else:
+            mapped_class_name = None
+
+        adjectives[image_id] = adjectives_dict
+        class_names[image_id] = class_name
+        mapped_class_names[image_id] = mapped_class_name
+
+    # print(captions_data.keys())
+
+    index = 0
+    print(len(dataset_dicts))
+    for dataset_dict in dataset_dicts:
+        file_name = dataset_dict["file_name"]
+        image_id = extract_image_id(file_name)
+        dataset_dict["image_id"] = image_id
+
+        # if image_id in adjectives:
+        if image_id in adjectives:
+            dataset_dict["attributes_list"] = adjectives[image_id]
+
+        # if image_id in class_names:
+        if image_id in class_names:
+            dataset_dict["class_names"] = class_names[image_id]
+            dataset_dict["mapped_class_names"] = mapped_class_names[image_id]
+    return dataset_dicts
         
 
     return dataset_dicts
@@ -290,9 +351,10 @@ def register_pascal_context_59(root):
             extra_classes.append(category)
     meta.update({"val_extra_classes": extra_classes})
     print(extra_classes)
+    predicted_class_path = "pc-59_c_ram_a_llava_m_ST.json"# "pc-59_c_llava_a_llava_m_ST.json"
     for name, image_dirname, sem_seg_dirname, adjectives_file_name in [
-        ("test", "JPEGImages", "annotations_detectron2/pc59_val", 
-         "llava-1.6-predicted_classes_pc59_validation_right_remapped.json"),
+        ("test", "JPEGImages", "annotations_detectron2/pc59_val",
+         predicted_class_path),
          #"llava-1.6-gt_classes_predicted_adj_pc59_val.json"),#"llava-1.6-predicted_classes_pascal_context_59_validation_right.json"),
     ]:
         image_dir = os.path.join(root, image_dirname)
@@ -326,16 +388,19 @@ def register_pascal_context_459(root):
             extra_classes.append(category)
     meta.update({"val_extra_classes": extra_classes})
     print(extra_classes)
-    for name, image_dirname, sem_seg_dirname in [
-        ("test", "JPEGImages", "annotations_detectron2/pc459_val"),
+    predicted_class_path = "cleaned_data.json"
+    for name, image_dirname, sem_seg_dirname,adjectives_file_name in [
+        ("test", "JPEGImages", "annotations_detectron2/pc459_val",
+         predicted_class_path),
     ]:
         image_dir = os.path.join(root, image_dirname)
         gt_dir = os.path.join(root, sem_seg_dirname)
         name = f"context_459_{name}_sem_seg"
-        DatasetCatalog.register(name, lambda x=image_dir, y=gt_dir: load_sem_seg(y, x, gt_ext='tif', image_ext='jpg'))
+        adjectives_file = os.path.join(root, adjectives_file_name)
+        DatasetCatalog.register(name, lambda x=image_dir, y=gt_dir: load_pc_59_with_attributes(y, x, adjectives_file))
         MetadataCatalog.get(name).set(image_root=image_dir, seg_seg_root=gt_dir, evaluator_type="sem_seg", ignore_label=459, **meta,)
 
 
-_root = os.getenv("DETECTRON2_DATASETS", "datasets")
+_root = os.getenv("DETECTRON2_DATASETS", "/media/lttm/lttm_nas/datasets")
 register_pascal_context_59(_root)
 register_pascal_context_459(_root)

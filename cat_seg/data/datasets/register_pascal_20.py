@@ -3,6 +3,7 @@ import os
 from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.data.datasets import load_sem_seg
 import copy
+import json
 
 COCO_CATEGORIES = [
     {"color": [220, 20, 60], "isthing": 1, "id": 1, "name": "person"},
@@ -192,6 +193,74 @@ def _get_pascal_voc_meta():
     }
     return ret
 
+
+def extract_image_id(file_name):
+    # Extract the filename from the full path
+    base_name = os.path.basename(file_name)
+
+    # Remove the file extension
+    name_without_ext = os.path.splitext(base_name)[0]
+    # name_without_ = name_without_ext.split("_")[-1]
+    # print(name_without_)
+    # Return the image ID
+    return name_without_ext  # int(name_without_.lstrip('0'))
+
+
+def load_voc20_with_attributes(image_dir, gt_dir, adjectives_file):
+    dataset_dicts = load_sem_seg(image_dir, gt_dir, gt_ext="png", image_ext="jpg")
+    print(adjectives_file)
+    with open(adjectives_file, 'r') as f:
+        adjectives_data = json.load(f)
+
+    adjectives = {}
+    class_names = {}
+    mapped_class_names = {}
+    print(len(adjectives_data))
+    for data in adjectives_data:
+        file_name = data["file_name"]
+        image_id = extract_image_id(file_name)
+        data["image_id"] = image_id
+        # if index < 11:
+        # print(type(image_id))
+
+        if "attributes_list" in data:
+            adjectives_dict = data['attributes_list']
+        else:
+            adjectives_dict = None
+
+        class_name = data['class_names']
+
+        if "mapped_class_names" in data:
+            mapped_class_name = data['mapped_class_names']
+        else:
+            mapped_class_name = None
+
+        adjectives[image_id] = adjectives_dict
+        class_names[image_id] = class_name
+        mapped_class_names[image_id] = mapped_class_name
+
+    for dataset_dict in dataset_dicts:
+        file_name = dataset_dict["file_name"]
+        image_id = extract_image_id(file_name)
+        dataset_dict["image_id"] = image_id
+
+        if image_id in adjectives:
+            dataset_dict["attributes_list"] = adjectives[image_id]
+        else:
+            dataset_dict["attributes_list"] = {}
+
+        # if image_id in class_names:
+        if image_id in class_names:
+            dataset_dict["class_names"] = class_names[image_id]
+        else:
+            dataset_dict["class_names"] = []
+
+        if image_id in class_names:
+            dataset_dict["mapped_class_names"] = mapped_class_names[image_id]
+        else:
+            dataset_dict["mapped_class_names"] = []
+    return dataset_dicts
+
 def register_all_pascal_voc(root):
     root = os.path.join(root, "VOCdevkit/VOC2012")
     meta = _get_pascal_voc_meta()
@@ -204,16 +273,17 @@ def register_all_pascal_voc(root):
         if not seen:
             extra_classes.append(category)
     meta.update({"val_extra_classes": extra_classes})
-    #meta.update({"val_extra_classes": []})
-    for name, image_dirname, sem_seg_dirname in [
-        ("test", "JPEGImages", "annotations_detectron2"),
-        ("test_background", "JPEGImages", "annotations_detectron2_bg"),
+    predicted_class_path = "voc-20_c_ram_a_llava_m_ST.json"
+    for name, image_dirname, sem_seg_dirname, adjectives_file_name  in [
+        ("test", "JPEGImages", "annotations_detectron2", predicted_class_path),
+        ("test_background", "JPEGImages", "annotations_detectron2_bg", predicted_class_path),
     ]:
         image_dir = os.path.join(root, image_dirname)
         gt_dir = os.path.join(root, sem_seg_dirname, 'val')
         name = f"voc_2012_{name}_sem_seg"
+        adjectives_file = os.path.join(root, adjectives_file_name)
 
-        DatasetCatalog.register(name, lambda x=image_dir, y=gt_dir: load_sem_seg(y, x, gt_ext='png', image_ext='jpg'))
+        DatasetCatalog.register(name, lambda x=image_dir, y=gt_dir: load_voc20_with_attributes(y, x, adjectives_file))
         if "background" in name:
             MetadataCatalog.get(name).set(image_root=image_dir, seg_seg_root=gt_dir, evaluator_type="sem_seg_background", ignore_label=255,
                                           stuff_classes=meta["stuff_classes"] + ["background"], stuff_colors=meta["stuff_colors"])
@@ -233,6 +303,6 @@ def register_all_pascal_voc_background(root):
         DatasetCatalog.register(name, lambda x=image_dir, y=gt_dir: load_sem_seg(y, x, gt_ext='png', image_ext='jpg'))
         MetadataCatalog.get(name).set(image_root=image_dir, seg_seg_root=gt_dir, evaluator_type="sem_seg_background", ignore_label=255, **meta,)
 
-_root = os.getenv("DETECTRON2_DATASETS", "datasets")
+_root = os.getenv("DETECTRON2_DATASETS", "/media/lttm/lttm_nas/datasets")
 register_all_pascal_voc(_root)
 #register_all_pascal_voc_background(_root)
