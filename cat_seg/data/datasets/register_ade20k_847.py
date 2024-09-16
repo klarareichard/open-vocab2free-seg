@@ -1,4 +1,5 @@
 import os
+import json
 
 from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.data.datasets import load_sem_seg
@@ -198,6 +199,61 @@ def _get_ade20k_full_val_all_meta_freq():
     }
     return ret
 
+def extract_image_id(file_name):
+    # Extract the filename from the full path
+    base_name = os.path.basename(file_name)
+
+    # Remove the file extension
+    name_without_ext = os.path.splitext(base_name)[0]
+    name_without_ = name_without_ext.split("_")[-1]
+    # print(name_without_)
+    # Return the image ID
+    return int(name_without_.lstrip('0'))
+
+
+def load_ade_with_attributes(image_dir, gt_dir, adjectives_file):
+    dataset_dicts = load_sem_seg(image_dir, gt_dir, gt_ext="tif", image_ext="jpg")
+    with open(adjectives_file, 'r') as f:
+        adjectives_data = json.load(f)
+
+    adjectives = {}
+    class_names = {}
+    mapped_class_names = {}
+    for data in adjectives_data:
+        file_name = data["file_name"]
+        image_id = extract_image_id(file_name)
+        data["image_id"] = image_id
+
+        if "attributes_list" in data:
+            adjectives_dict = data['attributes_list']
+        else:
+            adjectives_dict = None
+
+        class_name = data['class_names']
+
+        if "mapped_class_names" in data:
+            mapped_class_name = data['mapped_class_names']
+        else:
+            mapped_class_name = None
+
+        adjectives[image_id] = adjectives_dict
+        class_names[image_id] = class_name
+        mapped_class_names[image_id] = mapped_class_name
+
+    for dataset_dict in dataset_dicts:
+        file_name = dataset_dict["file_name"]
+        image_id = extract_image_id(file_name)
+        dataset_dict["image_id"] = image_id
+
+        if image_id in adjectives:
+            dataset_dict["attributes_list"] = adjectives[image_id]
+
+        if image_id in class_names:
+            dataset_dict["class_names"] = class_names[image_id]
+            dataset_dict["mapped_class_names"] = mapped_class_names[image_id]
+
+    return dataset_dicts
+
 
 def register_all_ade20k_full_val_all_freq(root):
     root = os.path.join(root, "ADE20K_2021_17_01")
@@ -205,11 +261,13 @@ def register_all_ade20k_full_val_all_freq(root):
     meta.update({"val_extra_classes": []})
 
     name, dirname = "val_all", "val_all"
+    predicted_class_path = "a-847_c_ramplus_a_llava.json"
+    attributes_list = os.path.join(root, predicted_class_path)
     image_dir = os.path.join(root, "images_detectron2", "validation")
     gt_dir = os.path.join(root, "annotations_detectron2", "validation")
     name = f"ade20k_full_sem_seg_freq_{name}"
     DatasetCatalog.register(
-        name, lambda x=image_dir, y=gt_dir: load_sem_seg(y, x, gt_ext="tif", image_ext="jpg")
+        name, lambda x=image_dir, y=gt_dir: load_ade_with_attributes(y, x, attributes_list)
     )
 
     MetadataCatalog.get(name).set(
@@ -222,5 +280,5 @@ def register_all_ade20k_full_val_all_freq(root):
     )
 
 
-_root = os.getenv("DETECTRON2_DATASETS", "datasets")
+_root = os.getenv("DETECTRON2_DATASETS", "/media/lttm/lttm_nas/datasets")
 register_all_ade20k_full_val_all_freq(_root)

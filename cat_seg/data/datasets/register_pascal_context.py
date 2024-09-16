@@ -351,7 +351,7 @@ def register_pascal_context_59(root):
             extra_classes.append(category)
     meta.update({"val_extra_classes": extra_classes})
     print(extra_classes)
-    predicted_class_path = "pc-59_c_ram_a_llava_m_ST.json"# "pc-59_c_llava_a_llava_m_ST.json"
+    predicted_class_path = "pc-59_c_ram_a_llava_m_ST_updated.json"# "pc-59_c_llava_a_llava_m_ST.json"
     for name, image_dirname, sem_seg_dirname, adjectives_file_name in [
         ("test", "JPEGImages", "annotations_detectron2/pc59_val",
          predicted_class_path),
