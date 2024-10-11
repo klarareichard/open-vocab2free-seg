@@ -45,6 +45,7 @@ class CATSegPredictor(nn.Module):
         window_sizes: tuple,
         attention_type: str,
         vocab_free: str = False,
+        all_adjectives: str = False,
     ):
         """
         Args:
@@ -117,6 +118,7 @@ class CATSegPredictor(nn.Module):
         self.tokens = None
         self.cache = None
         self.vocab_free = vocab_free
+        self.all_adjectives = all_adjectives
 
     @classmethod
     def from_config(cls, cfg):#, in_channels, mask_classification):
@@ -149,6 +151,7 @@ class CATSegPredictor(nn.Module):
         ret["attention_type"] = cfg.MODEL.SEM_SEG_HEAD.ATTENTION_TYPE
 
         ret["vocab_free"] = cfg.VOCAB_FREE
+        ret["all_adjectives"] = cfg.ALL_ADJECTIVES
 
         return ret
 
@@ -266,17 +269,45 @@ class CATSegPredictor(nn.Module):
                 if adjectives is not None and adjectives[i] is not None and classname in adjectives[i]:
                     adjectives_per_class = adjectives[i][classname]
                     if adjectives_per_class:
-                        adjective = random.choice(adjectives_per_class)
-                        attribute_list = [adjective]
-                        before_noun, after_noun = self.classify_attributes_with_spacy(attribute_list)
-                        adj_desc_before = " ".join(before_noun) if before_noun else None
-                        adj_desc_after = " ".join(after_noun) if after_noun else None
+                        if self.all_adjectives:
+                            # Accumulate all adjectives if self.all_adjectives is True
+                            adj_desc_before, adj_desc_after = [], []
+                            for adjective in adjectives_per_class:
+                                attribute_list = [adjective]
+                                before_noun, after_noun = self.classify_attributes_with_spacy(attribute_list)
+                                if before_noun:
+                                    adj_desc_before.extend(before_noun)
+                                if after_noun:
+                                    adj_desc_after.extend(after_noun)
+                        else:
+                            # Select a random adjective if self.all_adjectives is False
+                            adjective = random.choice(adjectives_per_class)
+                            attribute_list = [adjective]
+                            before_noun, after_noun = self.classify_attributes_with_spacy(attribute_list)
+                            adj_desc_before = " ".join(before_noun) if before_noun else None
+                            adj_desc_after = " ".join(after_noun) if after_noun else None
 
                 formatted_text = classname
-                if adj_desc_before:
-                    formatted_text = f"{adj_desc_before} {formatted_text}"
-                if adj_desc_after:
-                    formatted_text = f"{formatted_text} {adj_desc_after}"
+
+                # Helper function to join adjectives with 'and' before the last one
+                def join_adjectives(adj_list):
+                    if len(adj_list) > 1:
+                        return ', '.join(adj_list[:-1]) + ' and ' + adj_list[-1]
+                    elif len(adj_list) == 1:
+                        return adj_list[0]
+                    return ''
+
+                # Join all adjectives if self.all_adjectives is True
+                if self.all_adjectives:
+                    if adj_desc_before:
+                        formatted_text = f"{join_adjectives(adj_desc_before)} {formatted_text}"  # Join adjectives before the class name
+                    if adj_desc_after:
+                        formatted_text = f"{formatted_text} {join_adjectives(adj_desc_after)}"  # Join adjectives after the class name
+                else:  # Current behavior if self.all_adjectives is False
+                    if adj_desc_before:
+                        formatted_text = f"{adj_desc_before} {formatted_text}"
+                    if adj_desc_after:
+                        formatted_text = f"{formatted_text} {adj_desc_after}"
                 print(formatted_text)
 
                 texts = [template.format(formatted_text) for template in templates]

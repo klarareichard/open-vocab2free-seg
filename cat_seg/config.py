@@ -94,3 +94,4 @@ def add_cat_seg_config(cfg):
     cfg.MODEL.GT_CLS = False
 
     cfg.VOCAB_FREE = False
+    cfg.ALL_ADJECTIVES = False
