@@ -46,6 +46,9 @@ class CATSegPredictor(nn.Module):
         attention_type: str,
         vocab_free: str = False,
         all_adjectives: str = False,
+        weighted_sampling: str = False,
+        agg_strategy: str = 'union',
+        seed: int = 8262,
     ):
         """
         Args:
@@ -62,6 +65,9 @@ class CATSegPredictor(nn.Module):
         assert self.class_texts != None
         if self.test_class_texts == None:
             self.test_class_texts = self.class_texts
+        self.seed = seed
+        if self.seed:
+            random.seed(self.seed)
         device = "cuda" if torch.cuda.is_available() else "cpu"
   
         self.tokenizer = None
@@ -119,6 +125,8 @@ class CATSegPredictor(nn.Module):
         self.cache = None
         self.vocab_free = vocab_free
         self.all_adjectives = all_adjectives
+        self.agg_strategy = agg_strategy
+        self.weighted_sampling = weighted_sampling
 
     @classmethod
     def from_config(cls, cfg):#, in_channels, mask_classification):
@@ -152,17 +160,21 @@ class CATSegPredictor(nn.Module):
 
         ret["vocab_free"] = cfg.VOCAB_FREE
         ret["all_adjectives"] = cfg.ALL_ADJECTIVES
+        ret["agg_strategy"] = cfg.AGG_STRATEGY
+        ret["weighted_sampling"] = cfg.WEIGHTED_SAMPLING
+
+        ret["seed"] = cfg.MODEL.SEED
 
         return ret
 
-    def forward(self, x, vis_guidance, prompt=None, gt_cls=None, adjectives=None, mapped_class_names = None, predicted_class_names = None):
+    def forward(self, x, vis_guidance, prompt=None, gt_cls=None, adjectives=None, mapped_class_names = None, predicted_class_names = None, clusters = None):
         vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
         text = self.class_texts if self.training else self.test_class_texts
         text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt, adjectives, mapped_class_names, predicted_class_names)
         text = text.repeat(x.shape[0], 1, 1, 1) if x.shape[0] != text.shape[0] else text
         text = text[:, gt_cls, :, :] if gt_cls is not None else text
         out = self.transformer(x, text, vis)
-        
+
         if gt_cls is not None:
             C_all = self.class_texts if self.training else self.test_class_texts
             C_all = len(C_all)
@@ -173,6 +185,11 @@ class CATSegPredictor(nn.Module):
             for i, c in enumerate(gt_cls):
                 out_all = out_all.index_add(1, c, out[:, i, :, :].unsqueeze(1))
             return out_all
+
+        # Apply clustering aggregation if vocabulary free
+        if self.vocab_free and clusters is not None and self.agg_strategy not in ['early', 'late']:
+            # DO NOT USE
+            out = self.aggregate_cost_maps(out, clusters[0], strategy=self.agg_strategy)
 
         return out
 
@@ -239,6 +256,16 @@ class CATSegPredictor(nn.Module):
         # If mapped_class_names is None, return the original adjectives dictionary
         return adjectives
 
+    def compute_all_adjective_weights(self, all_adjectives):
+        # Count all adjective occurrences
+        adjective_counts = {}
+        for class_adjectives in all_adjectives.values():
+            for adj in class_adjectives:
+                adjective_counts[adj] = adjective_counts.get(adj, 0) + 1
+
+        # Compute weight for each adjective
+        return {adj: 1 / (count + 0.1) for adj, count in adjective_counts.items()}
+
     def get_text_embeds(self, classnames, templates, clip_model, prompt=None, adjectives=None, mapped_class_names=None,
                         predicted_class_names=None):
         B = len(adjectives) if adjectives is not None else 1
@@ -264,6 +291,7 @@ class CATSegPredictor(nn.Module):
         all_tokens = []
         for i in range(B):
             batch_tokens = []
+            adjective_weights = self.compute_all_adjective_weights(adjectives[i]) if adjectives[i] is not None and self.weighted_sampling else None
             for classname in classnames:
                 adj_desc_before, adj_desc_after = None, None
                 if adjectives is not None and adjectives[i] is not None and classname in adjectives[i]:
@@ -281,7 +309,11 @@ class CATSegPredictor(nn.Module):
                                     adj_desc_after.extend(after_noun)
                         else:
                             # Select a random adjective if self.all_adjectives is False
-                            adjective = random.choice(adjectives_per_class)
+                            if self.weighted_sampling:
+                                weights = [adjective_weights[adj] for adj in adjectives_per_class]
+                                adjective = random.choices(adjectives_per_class, weights=weights, k=1)[0]
+                            else:
+                                adjective = random.choice(adjectives_per_class)
                             attribute_list = [adjective]
                             before_noun, after_noun = self.classify_attributes_with_spacy(attribute_list)
                             adj_desc_before = " ".join(before_noun) if before_noun else None
@@ -310,6 +342,7 @@ class CATSegPredictor(nn.Module):
                         formatted_text = f"{formatted_text} {adj_desc_after}"
                 print(formatted_text)
 
+
                 texts = [template.format(formatted_text) for template in templates]
                 #print(texts)
                 if self.tokenizer is not None:
@@ -336,3 +369,78 @@ class CATSegPredictor(nn.Module):
             class_embeddings = class_embeddings.view(B, C, -1)
             class_embeddings = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True)
             return class_embeddings.unsqueeze(2)
+
+    def aggregate_cost_maps(self, out, clusters, strategy='union', overlap_threshold=0.5, temperature=1.0):
+        """
+        Aggregate cost maps according to cluster information using different strategies.
+
+        Args:
+            out (torch.Tensor): Output tensor of shape (B, C, H, W) containing cost maps
+            clusters (dict): Dictionary mapping cluster IDs to lists of class names/indices
+            strategy (str): Aggregation strategy ('union', 'max', 'weighted')
+            overlap_threshold (float): Threshold for considering maps as overlapping (0-1)
+            temperature (float): Temperature parameter for softmax weighting
+
+        Returns:
+            torch.Tensor: Aggregated cost maps
+        """
+
+        B, C, H, W = out.size()
+
+        # Create a mapping from class index to cluster index
+        class_to_cluster = {}
+        for cluster_idx, classes in clusters.items():
+            for class_name in classes:
+                class_to_cluster[class_name] = cluster_idx
+
+        # Initialize output tensor with same size as input but with number of clusters
+        num_clusters = len(clusters)
+        aggregated_maps = torch.zeros(B, num_clusters, H, W, device=out.device)
+
+        if strategy == 'union':
+            # Simple union (sum) of cost maps within each cluster
+            for cluster_idx, classes in clusters.items():
+                class_indices = [i for i, c in enumerate(classes)]
+                cluster_maps = out[:, class_indices]
+                aggregated_maps[:, int(cluster_idx)-1] = cluster_maps.sum(dim=1)
+
+        elif strategy == 'max':
+            # Take maximum response within each cluster
+            for cluster_idx, classes in clusters.items():
+                class_indices = [i for i, c in enumerate(classes)]
+                cluster_maps = out[:, class_indices]
+                aggregated_maps[:, int(cluster_idx)-1] = cluster_maps.max(dim=1)[0]
+
+        elif strategy == 'weighted':
+            # Weighted combination based on spatial overlap
+            for cluster_idx, classes in clusters.items():
+                class_indices = [i for i, c in enumerate(classes)]
+                cluster_maps = out[:, class_indices]
+
+                # Compute pairwise overlap between maps in the cluster
+                B, N, H, W = cluster_maps.size()
+                weights = torch.ones(B, N, device=out.device)
+
+                for i in range(N):
+                    for j in range(i + 1, N):
+                        map1 = cluster_maps[:, i]
+                        map2 = cluster_maps[:, j]
+
+                        # Compute normalized overlap
+                        intersection = torch.min(map1, map2).sum(dim=(1, 2))
+                        union = torch.max(map1, map2).sum(dim=(1, 2))
+                        overlap = intersection / (union + 1e-6)
+
+                        # Update weights based on overlap
+                        mask = overlap > overlap_threshold
+                        weights[:, i] += mask.float()
+                        weights[:, j] += mask.float()
+
+                # Apply softmax to get normalized weights
+                weights = F.softmax(weights / temperature, dim=1)
+
+                # Weighted sum of maps
+                weighted_maps = cluster_maps * weights.view(B, N, 1, 1)
+                aggregated_maps[:, int(cluster_idx)-1] = weighted_maps.sum(dim=1)
+
+        return aggregated_maps

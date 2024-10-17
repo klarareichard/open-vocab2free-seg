@@ -225,6 +225,7 @@ def load_ade_with_attributes(image_dir, gt_dir, adjectives_file):
     adjectives = {}
     class_names = {}
     mapped_class_names = {}
+    clusters = {}
     for data in adjectives_data:
         file_name = data["file_name"]
         image_id = extract_image_id(file_name)
@@ -242,9 +243,15 @@ def load_ade_with_attributes(image_dir, gt_dir, adjectives_file):
         else:
             mapped_class_name = None
 
+        if "clusters" in data:
+            cluster = data['clusters']
+        else:
+            cluster = None
+
         adjectives[image_id] = adjectives_dict
         class_names[image_id] = class_name
         mapped_class_names[image_id] = mapped_class_name
+        clusters[image_id] = cluster
 
     for dataset_dict in dataset_dicts:
         file_name = dataset_dict["file_name"]
@@ -257,6 +264,8 @@ def load_ade_with_attributes(image_dir, gt_dir, adjectives_file):
         if image_id in class_names:
             dataset_dict["class_names"] = class_names[image_id]
             dataset_dict["mapped_class_names"] = mapped_class_names[image_id]
+        if image_id in clusters:
+            dataset_dict["clusters"] = clusters[image_id]
 
     return dataset_dicts
 
@@ -278,7 +287,7 @@ def register_ade20k_150(root):
     # VOCAB-FREE + adj: ram_predicted_class_names_ade_val_vocab_free.json
     # GT + adj: llava-1.6-gt_classes_predicted_adj_ade_val.json
     # Llava + adj: llava-1.6-predicted_classes_ade_validation_fixed.json #llava-1.6-predicted_classes_adjectives_ade_validation_fixed.json
-    predicted_class_path = "a-150_c_ram_a_llava_m_ST.json" #"ram_predicted_class_names_ade_val_vocab_free.json"#"llava-1.6-predicted_classes_ade_validation_right_fixed.json"#"llava-1.6-gt_classes_predicted_adj_ade_val.json" #"ram_plus_class_names_ade_only_ade_tags.json" # "ram_predicted_class_names_ade_all_tags.json"
+    predicted_class_path = "a-150_c_ram_a_llava_m_ST_cl_3e-1.json"#"filtered_output.json"# #"a-150_c_cased_m_ST_thres07.json"#"a-150_c_ram_a_llava_m_ST.json"# "filtered_output.json" #"ram_predicted_class_names_ade_val_vocab_free.json"#"llava-1.6-predicted_classes_ade_validation_right_fixed.json"#"llava-1.6-gt_classes_predicted_adj_ade_val.json" #"ram_plus_class_names_ade_only_ade_tags.json" # "ram_predicted_class_names_ade_all_tags.json"
     for name, image_dirname, sem_seg_dirname, attributes_list_file in [
         ("test", "images/validation", "annotations_detectron2/validation",
             predicted_class_path),
@@ -298,5 +307,5 @@ def register_ade20k_150(root):
                                       ignore_label=255, **meta, )
 
 
-_root = os.getenv("DETECTRON2_DATASETS", "/media/lttm/lttm_nas/datasets")
+_root = os.getenv("DETECTRON2_DATASETS", "datasets")
 register_ade20k_150(_root)

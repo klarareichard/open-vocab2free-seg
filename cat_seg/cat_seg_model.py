@@ -35,6 +35,7 @@ class CATSeg(nn.Module):
         backbone_multiplier: float,
         clip_pretrained: str,
         gt_classes: bool = False,
+        clusters: bool = False,
     ):
         """
         Args:
@@ -83,6 +84,7 @@ class CATSeg(nn.Module):
         self.upsample2 = nn.ConvTranspose2d(self.proj_dim, 128, kernel_size=4, stride=4)
 
         self.gt_classes = gt_classes
+        self.clusters = clusters
 
         self.layer_indexes = [3, 7] if clip_pretrained == "ViT-B/16" else [7, 15] 
         self.layers = []
@@ -111,6 +113,7 @@ class CATSeg(nn.Module):
             "backbone_multiplier": cfg.SOLVER.BACKBONE_MULTIPLIER,
             "clip_pretrained": cfg.MODEL.SEM_SEG_HEAD.CLIP_PRETRAINED,
             "gt_classes": getattr(cfg.MODEL, "GT_CLS", False),
+            "clusters": getattr(cfg, "CLUSTERS", False),
         }
 
     @property
@@ -146,6 +149,7 @@ class CATSeg(nn.Module):
         adjectives = [x.get("attributes_list", "") for x in batched_inputs]
         mapped_class_names = [x.get("mapped_class_names", "") for x in batched_inputs]
         predicted_class_names = [x.get("class_names", "") for x in batched_inputs]
+        clusters = [x.get("clusters", "") for x in batched_inputs] if self.clusters else None
         if not self.training and self.sliding_window:
             return self.inference_sliding_window(batched_inputs)
 
@@ -171,7 +175,10 @@ class CATSeg(nn.Module):
         res4 = self.upsample1(res4)
         res5 = self.upsample2(res5)
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
-        outputs = self.sem_seg_head(clip_features, features, gt_cls = gt_cls, adjectives = adjectives, mapped_class_names = mapped_class_names, predicted_class_names = predicted_class_names)
+        outputs = self.sem_seg_head(clip_features, features, gt_cls = gt_cls, adjectives = adjectives,
+                                    mapped_class_names = mapped_class_names,
+                                    predicted_class_names = predicted_class_names,
+                                    clusters=clusters)
         if self.training:
             targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
             outputs = F.interpolate(outputs, size=(targets.shape[-2], targets.shape[-1]), mode="bilinear", align_corners=False)
@@ -205,6 +212,7 @@ class CATSeg(nn.Module):
         adjectives = [x.get("attributes_list", "") for x in batched_inputs]
         mapped_class_names = [x.get("mapped_class_names", "") for x in batched_inputs]
         predicted_class_names = [x.get("class_names", "") for x in batched_inputs]
+        clusters = [x.get("clusters", "") for x in batched_inputs] if self.clusters else None
         gt_cls = [x.get("sem_seg", "").to(self.device) for x in batched_inputs] if self.gt_classes else None
         print([x.get("file_name", "") for x in batched_inputs])
         if gt_cls is not None:
@@ -232,7 +240,10 @@ class CATSeg(nn.Module):
         res5 = self.upsample2(rearrange(self.layers[1][1:, :, :], "(H W) B C -> B C H W", H=24))
 
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
-        outputs = self.sem_seg_head(clip_features, features, gt_cls = gt_cls, adjectives = adjectives, mapped_class_names = mapped_class_names, predicted_class_names = predicted_class_names)
+        outputs = self.sem_seg_head(clip_features, features, gt_cls = gt_cls, adjectives = adjectives,
+                                    mapped_class_names = mapped_class_names,
+                                    predicted_class_names = predicted_class_names,
+                                    clusters=clusters)
 
         outputs = F.interpolate(outputs, size=kernel, mode="bilinear", align_corners=False)
         outputs = outputs.sigmoid()

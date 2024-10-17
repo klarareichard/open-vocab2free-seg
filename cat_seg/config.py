@@ -91,7 +91,12 @@ def add_cat_seg_config(cfg):
 
     cfg.MODEL.SEM_SEG_HEAD.CLIP_FINETUNE = "attention"
     cfg.TEST.SLIDING_WINDOW = False
+
+    cfg.MODEL.SEED = None
     cfg.MODEL.GT_CLS = False
 
     cfg.VOCAB_FREE = False
     cfg.ALL_ADJECTIVES = False
+    cfg.CLUSTERS = False
+    cfg.AGG_STRATEGY = None
+    cfg.WEIGHTED_SAMPLING = False

@@ -53,11 +53,12 @@ class CATSegHead(nn.Module):
             ),
         }
 
-    def forward(self, features, guidance_features, prompt=None, gt_cls=None, adjectives=None, mapped_class_names = None, predicted_class_names = None):
+    def forward(self, features, guidance_features, prompt=None, gt_cls=None, adjectives=None, mapped_class_names = None,
+                predicted_class_names = None, clusters=None):
         """
         Arguments:
             img_feats: (B, C, HW)
             guidance_features: (B, C, )
         """
         img_feat = rearrange(features[:, 1:, :], "b (h w) c->b c h w", h=self.feature_resolution[0], w=self.feature_resolution[1])
-        return self.predictor(img_feat, guidance_features, prompt, gt_cls, adjectives, mapped_class_names, predicted_class_names)
+        return self.predictor(img_feat, guidance_features, prompt, gt_cls, adjectives, mapped_class_names, predicted_class_names, clusters=clusters)

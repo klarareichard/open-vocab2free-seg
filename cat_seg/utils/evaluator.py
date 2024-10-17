@@ -65,14 +65,23 @@ class VocabFreeEvaluator(DatasetEvaluator):
         self.mapped_hji.reset()
 
     def process(self, inputs, outputs):
+        """
+        Process inputs and outputs while handling class name substitution within clusters.
+        """
         for input, output in zip(inputs, outputs):
             pred_classes = input["class_names"]
-            # pred_classes = [s.strip("'") for s in pred_classes.strip("[]").split(", ")]
-            #pred_classes = [*{*pred_classes}]
             pred_mask = output["sem_seg"].cpu().numpy()
-            pred = [(pred_classes, pred_mask)]
-
             mapped_classes = input.get("mapped_class_names", "")
+
+            # Apply cluster substitution if clusters are defined
+            if input.get("clusters"):
+                clusters = input.get("clusters")
+                if mapped_classes:
+                    mapped_classes = self.substitute_mapped_classes(pred_classes, mapped_classes, clusters)
+                pred_classes = self.substitute_names(pred_classes, clusters)
+
+
+            pred = [(pred_classes, pred_mask)]
             if mapped_classes:
                 map_pred = [(mapped_classes, pred_mask)]
 
@@ -149,3 +158,70 @@ class VocabFreeEvaluator(DatasetEvaluator):
     @staticmethod
     def load_gt_sem_seg(gt_filename: str) -> np.ndarray:
         return np.array(Image.open(gt_filename))
+
+    def substitute_names(self, pred_classes, clusters):
+        """
+        Substitute predicted class names based on cluster matching with ground truth.
+
+        Args:
+            pred_classes: List of predicted class names
+            clusters: Dictionary of cluster_id -> list of class names
+
+        Returns:
+            List of substituted class names
+        """
+        # Create a copy to avoid modifying the original
+        result = pred_classes.copy()
+
+        # For each cluster
+        for cluster_id, cluster_words in clusters.items():
+            # Find matches with ground truth classes
+            matches = set()
+            for word in cluster_words:
+                if word in self._class_names:
+                    matches.add(word)
+
+            # If exactly one unique match found
+            if len(matches) == 1:
+                matched_word = matches.pop()
+                # Replace all cluster words in predictions with the matched word
+                for word in cluster_words:
+                    for i, pred in enumerate(result):
+                        if pred == word:
+                            result[i] = matched_word
+
+        return result
+
+    def substitute_mapped_classes(self, pred_classes, mapped_classes, clusters):
+        """
+        Substitute mapped class names based on cluster matching.
+
+        Args:
+            pred_classes: List of predicted class names
+            mapped_classes: List of mapped class names
+            clusters: Dictionary of cluster_id -> list of class names
+
+        Returns:
+            List of substituted mapped classes
+        """
+        result = mapped_classes.copy()
+
+        # For each cluster
+        for cluster_id, cluster_words in clusters.items():
+            # Get corresponding mapped classes for this cluster
+            cluster_mapped_classes = set()
+            for word in cluster_words:
+                idx = pred_classes.index(word)
+                mapped_class = mapped_classes[idx]
+                if not mapped_class.startswith("unknown"):
+                    cluster_mapped_classes.add(mapped_class)
+
+            # If all non-unknown mapped classes in cluster are the same
+            if len(cluster_mapped_classes) == 1:
+                agreed_class = cluster_mapped_classes.pop()
+                # Replace mapped classes for all words in this cluster
+                for word in cluster_words:
+                    idx = pred_classes.index(word)
+                    result[idx] = agreed_class
+
+        return result
