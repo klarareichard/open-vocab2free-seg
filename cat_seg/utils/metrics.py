@@ -8,6 +8,9 @@ import torch.nn.functional as F
 from torchmetrics import Metric
 from torchmetrics.classification import MulticlassJaccardIndex, MulticlassRecall
 from typing import List, Tuple
+import json
+from collections import OrderedDict
+
 
 from .singletons import SentenceBERT
 
@@ -139,6 +142,175 @@ class SemanticClusterJaccardIndex(Metric):
             return torch.mean(torch.stack(jaccard_indexes))
 
 
+class SemanticWeightedJaccardIndex:
+    def __init__(self, dataset_json, ignore_index, similarity_matrix, device="cpu"):
+        """
+        Initializes the SemanticWeightedJaccardIndex for calculating weighted mean IoU.
+
+        Args:
+        - dataset_json (str): Path to JSON file containing the list of class names for target masks.
+        - ignore_index (int): Index to ignore in the IoU calculation.
+        - similarity_matrix (dict): Similarity matrix with class names as keys.
+        - device (str): Device to run the computation on.
+        """
+        # Load the class names for the target masks
+        with open(dataset_json, 'r') as file:
+            self.target_class_names = json.load(file)
+        
+        self.ignore_index = ignore_index
+        self.similarity_matrix = similarity_matrix
+        self.device = device
+        self.reset()
+
+    def reset(self):
+        """Resets the accumulated values."""
+        self.total_weighted_similarity = 0.0
+        self.total_pixels = 0
+        
+    import torch
+    import torch.nn.functional as F
+
+#    def update(self, pred_masks, gt_masks):
+#        for (pred_class_names, pred_mask), gt_mask in zip(pred_masks, gt_masks):
+            # Convert predicted mask from (num_classes, height, width) to (height, width)
+#            value_mask = torch.tensor(pred_mask, device=self.device, dtype=torch.float) #.unsqueeze(0)
+
+            # Ensure value_mask matches target shape
+            #if value_mask.shape[-2:] != gt_mask.shape[-2:]:
+            #    value_mask = F.interpolate(
+            #        value_mask.unsqueeze(0), size=gt_mask.shape[-2:], mode="bilinear", align_corners=False
+            #    ).squeeze(0)
+
+            # Convert the interpolated mask to a single-channel mask
+#            value_mask = value_mask.argmax(dim=0)  # (height, width)
+
+            # Create class-to-index mappings
+#            pred_name_to_index = {name: idx for idx, name in enumerate(pred_class_names)}
+#            gt_name_to_index = {name: idx for idx, name in enumerate(self.target_class_names)}
+
+            # Convert gt_mask to tensor and flatten
+#            gt_flat = torch.tensor(gt_mask, device=self.device).view(-1)  # Flatten ground truth mask
+
+            # Generate valid mask for ground truth
+#            valid_mask = gt_flat != self.ignore_index
+
+            # Print shapes for debugging
+#            print(f"value_mask shape: {value_mask.shape}, gt_flat shape: {gt_flat.shape}, valid_mask shape: {valid_mask.shape}")
+            
+            
+
+            # Flatten the value_mask
+#            pred_flat = value_mask.view(-1).cpu()  # Flatten and move to CPU
+            
+#            gt_flat = gt_flat.cpu()  # Move ground truth to CPU
+
+            # Validate length of filtered arrays
+#            valid_mask_cpu = valid_mask.cpu()  # Ensure valid_mask is also on CPU
+
+#            if valid_mask_cpu.sum() > 0:
+ #               valid_gt_flat = gt_flat[valid_mask_cpu]  # Ground truth pixels that are valid
+#                valid_pred_flat = pred_flat[valid_mask_cpu]  # Predicted pixels that are valid
+
+                # Check shapes before proceeding
+#                print(f"valid_gt_flat shape: {valid_gt_flat.shape}, valid_pred_flat shape: {valid_pred_flat.shape}")
+
+#                if valid_gt_flat.shape[0] != valid_pred_flat.shape[0]:
+#                    print(f"Shape mismatch: gt {valid_gt_flat.shape[0]}, pred {valid_pred_flat.shape[0]}")
+#                    continue  # Skip this pair or handle accordingly
+
+                # Calculate similarity for valid pixels
+#                for gt_val, pred_val in zip(valid_gt_flat, valid_pred_flat):
+#                    gt_class_name = self.target_class_names[gt_val.item()]
+#                    pred_class_name = pred_class_names[pred_val.item()]
+
+#                    similarity = self.similarity_matrix.get(gt_class_name, {}).get(pred_class_name, 0.0)
+#                    self.total_weighted_similarity += similarity
+
+                # Update total pixel count
+#                self.total_pixels += valid_mask.sum().item()
+#            else:
+#                print("No valid pixels found, skipping this mask pair.")
+
+
+
+
+            
+
+#    def compute(self):
+#        """Computes the final weighted mean IoU."""
+#        if self.total_pixels == 0:
+#            return 0.0  # Avoid division by zero if no valid pixels are available
+#        return self.total_weighted_similarity / self.total_pixels
+
+    
+    def update(self, pred_masks, gt_masks):
+        for (pred_class_names, pred_mask), gt_mask in zip(pred_masks, gt_masks):
+            # Convert predicted mask from (num_classes, height, width) to (height, width)
+            value_mask = torch.tensor(pred_mask, device=self.device, dtype=torch.float)
+
+            # Convert to single-channel mask
+            value_mask = value_mask.argmax(dim=0)  # (height, width)
+
+            # Create class-to-index mappings
+            pred_name_to_index = {name: idx for idx, name in enumerate(pred_class_names)}
+            gt_name_to_index = {name: idx for idx, name in enumerate(self.target_class_names)}
+
+            # Convert gt_mask to tensor and flatten
+            gt_flat = torch.tensor(gt_mask, device=self.device).view(-1)  # Flatten ground truth mask
+
+            # Generate valid mask for ground truth
+            valid_mask = gt_flat != self.ignore_index  # Shape: (349696,)
+
+            # Print shapes for debugging
+            print(f"value_mask shape: {value_mask.shape}, gt_flat shape: {gt_flat.shape}, valid_mask shape: {valid_mask.shape}")
+
+            # Flatten the value_mask
+            pred_flat = value_mask.view(-1)  # Keep on GPU
+
+            # Validate length of filtered arrays
+            if valid_mask.sum() > 0:
+                valid_gt_flat = gt_flat[valid_mask]  # Ground truth pixels that are valid
+                valid_pred_flat = pred_flat[valid_mask]  # Predicted pixels that are valid
+
+                # Check shapes before proceeding
+                print(f"valid_gt_flat shape: {valid_gt_flat.shape}, valid_pred_flat shape: {valid_pred_flat.shape}")
+
+                if valid_gt_flat.shape[0] != valid_pred_flat.shape[0]:
+                    print(f"Shape mismatch: gt {valid_gt_flat.shape[0]}, pred {valid_pred_flat.shape[0]}")
+                    continue  # Skip this pair or handle accordingly
+
+                # Prepare indices for ground truth and predicted classes
+                gt_indices = valid_gt_flat.long()  # Ensure indices are long
+                pred_indices = valid_pred_flat.long()  # Ensure indices are long
+
+                # Convert indices to class names
+                gt_class_names = [self.target_class_names[idx] for idx in gt_indices.cpu().numpy()]
+                pred_class_names = [pred_class_names[idx] for idx in pred_indices.cpu().numpy()]
+
+                # Retrieve similarity scores for all valid pairs
+                similarities = torch.tensor([
+                    self.similarity_matrix.get(gt_name, {}).get(pred_name, 0.0) 
+                    for gt_name, pred_name in zip(gt_class_names, pred_class_names)
+                ], device=self.device)
+
+                # Sum the similarities
+                self.total_weighted_similarity += similarities.sum().item()
+
+                # Update total pixel count
+                self.total_pixels += valid_mask.sum().item()
+            else:
+                print("No valid pixels found, skipping this mask pair.")
+
+    def compute(self):
+        """Computes the final weighted mean IoU."""
+        if self.total_pixels == 0:  # Use item() to get float for comparison
+            return 0.0
+        
+        return self.total_weighted_similarity / self.total_pixels  # Convert to float for final division
+
+
+
+
 class SemanticHardJaccardIndex(MulticlassJaccardIndex):
     """Metric to evaluate the semantic Jaccard index.
 
@@ -179,7 +351,8 @@ class SemanticHardJaccardIndex(MulticlassJaccardIndex):
             value_mask = np.vectorize(values_idx_to_class_idx.get)(value_mask)
 
             value = torch.tensor(value_mask, device=self.device)
-            target = torch.tensor(target, device=self.device)
+            target = torch.tensor(target.astype(np.int32), device=self.device)
+
 
             super().update(value, target)
 
@@ -303,7 +476,8 @@ class SemanticHardRecall(MulticlassRecall):
             value_mask = np.vectorize(values_idx_to_class_idx.get)(value_mask)
 
             value = torch.tensor(value_mask, device=self.device)
-            target = torch.tensor(target, device=self.device)
+            target = torch.tensor(target.astype(np.int32), device=self.device)
+
 
             super().update(value, target)
 
@@ -352,7 +526,8 @@ class SemanticSoftRecall(Metric):
 
         for value, target in zip(values, targets):
             names, value_mask = value
-            target = torch.tensor(target, device=self.device)
+            target = torch.tensor(target.astype(np.int32), device=self.device)
+
             value_mask = torch.tensor(value_mask, dtype=torch.float, device=self.device)
 
             # Ensure value_mask has the same spatial dimensions as target

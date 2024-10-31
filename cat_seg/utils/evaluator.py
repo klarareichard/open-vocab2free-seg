@@ -10,8 +10,9 @@ import json
 import logging
 from PIL import Image
 
-from .metrics import SemanticJaccardIndex, SemanticRecall
+from .metrics import SemanticJaccardIndex, SemanticRecall, SemanticWeightedJaccardIndex
 
+# Usage example within a process function
 
 class VocabFreeEvaluator(DatasetEvaluator):
     """
@@ -46,8 +47,8 @@ class VocabFreeEvaluator(DatasetEvaluator):
         # Initialize metrics on the correct device
         self.hji = SemanticJaccardIndex(mode="hard", classes=self._class_names, ignore_index=self._ignore_label).to(
             self._device)
-        self.sji = SemanticJaccardIndex(mode="soft", classes=self._class_names, ignore_index=self._ignore_label).to(
-            self._device)
+        #self.sji = SemanticJaccardIndex(mode="soft", classes=self._class_names, ignore_index=self._ignore_label).to(
+        #    self._device)
         self.hr = SemanticRecall(mode="hard", classes=self._class_names, ignore_index=self._ignore_label).to(
             self._device)
         self.sr = SemanticRecall(mode="soft", classes=self._class_names, ignore_index=self._ignore_label).to(
@@ -56,32 +57,46 @@ class VocabFreeEvaluator(DatasetEvaluator):
         # New HJI for mapped classes
         self.mapped_hji = SemanticJaccardIndex(mode="hard", classes=self._class_names,
                                                ignore_index=self._ignore_label).to(self._device)
+        
+        dataset_json = '/root/open_vocabulary_segmentation/datasets/ade150.json'
+        
+        similarity_matrix_json = 'datasets/a-150_c_ram_similarity_matrix.json'
+        # Open and load the JSON file
+        with open(similarity_matrix_json, 'r') as file:
+            similarity_matrix = json.load(file)
+        
+        self.weighted_jaccard_index = SemanticWeightedJaccardIndex(
+        dataset_json=dataset_json,
+        ignore_index=255,  # Replace with actual ignore label
+        similarity_matrix=similarity_matrix,
+        device=self._device
+    )
+
 
     def reset(self):
         self.hji.reset()
-        self.sji.reset()
+        #self.sji.reset()
         self.hr.reset()
         self.sr.reset()
         self.mapped_hji.reset()
+        self.weighted_jaccard_index.reset()
+
 
     def process(self, inputs, outputs):
-        """
-        Process inputs and outputs while handling class name substitution within clusters.
-        """
+        # Define the path to your JSON file
+        json_file_path = '/root/open_vocabulary_segmentation/datasets/ade150.json'
+
+        # Open and load the JSON file
+        with open(json_file_path, 'r') as file:
+            classnames = json.load(file)
         for input, output in zip(inputs, outputs):
             pred_classes = input["class_names"]
+            # pred_classes = [s.strip("'") for s in pred_classes.strip("[]").split(", ")]
+            #pred_classes = [*{*pred_classes}]
             pred_mask = output["sem_seg"].cpu().numpy()
-            mapped_classes = input.get("mapped_class_names", "")
-
-            # Apply cluster substitution if clusters are defined
-            if input.get("clusters"):
-                clusters = input.get("clusters")
-                if mapped_classes:
-                    mapped_classes = self.substitute_mapped_classes(pred_classes, mapped_classes, clusters)
-                pred_classes = self.substitute_names(pred_classes, clusters)
-
-
             pred = [(pred_classes, pred_mask)]
+
+            mapped_classes = input.get("mapped_class_names", "")
             if mapped_classes:
                 map_pred = [(mapped_classes, pred_mask)]
 
@@ -93,6 +108,7 @@ class VocabFreeEvaluator(DatasetEvaluator):
             self.hji.update(pred, gt)
             self.hr.update(pred, gt)
             self.sr.update(pred, gt)
+            self.weighted_jaccard_index.update(pred,gt)
 
             # Update SJI based on the presence of mapped classes
             if mapped_classes:
@@ -105,7 +121,7 @@ class VocabFreeEvaluator(DatasetEvaluator):
             synchronize()
             metric_states = all_gather({
                 'hji': self.hji.state_dict(),
-                'sji': self.sji.state_dict(),
+                #'sji': self.sji.state_dict(),
                 'hr': self.hr.state_dict(),
                 'sr': self.sr.state_dict(),
                 'mapped_hji': self.mapped_hji.state_dict()
@@ -115,23 +131,25 @@ class VocabFreeEvaluator(DatasetEvaluator):
                 return
 
             # Combine metric states
-            for metric_name in ['hji', 'sji', 'hr', 'sr', 'mapped_hji']:
+            for metric_name in ['hji', 'hr', 'sr', 'mapped_hji']:
                 getattr(self, metric_name).load_state_dict(
                     self._combine_states([state[metric_name] for state in metric_states])
                 )
 
         hji = self.hji.compute()
-        sji = self.sji.compute()
+        #sji = self.sji.compute()
         hr = self.hr.compute()
         sr = self.sr.compute()
         mapped_hji = self.mapped_hji.compute()
+        weighted_sji = self.weighted_jaccard_index.compute()
 
         res = OrderedDict()
         res["sem_seg"] = {
             "HJI": hji.item() * 100,
-            "SJI": mapped_hji.item() * 100 if mapped_hji.item() != 0 else sji.item() * 100,
+            "SJI": mapped_hji.item() * 100, #if mapped_hji.item() != 0 else sji.item() * 100,
             "HR": hr.item() * 100,
             "SR": sr.item() * 100,
+            "WSJI": weighted_sji * 100
         }
 
         if self._output_dir:
@@ -142,6 +160,20 @@ class VocabFreeEvaluator(DatasetEvaluator):
 
         results = OrderedDict({"sem_seg": res["sem_seg"]})
         self._logger.info(results)
+        
+        
+        if self._dataset_name:
+            output_path = os.path.join(self._output_dir, self._dataset_name)
+            PathManager.mkdirs(output_path)
+            output_file = os.path.join(output_path, "results.json")
+        
+
+        # Write the OrderedDict to the JSON file
+        with open(output_file, 'w') as f:
+            json.dump(results, f, indent=4)
+
+        
+        print(results)
         return results
 
     @staticmethod
@@ -158,70 +190,3 @@ class VocabFreeEvaluator(DatasetEvaluator):
     @staticmethod
     def load_gt_sem_seg(gt_filename: str) -> np.ndarray:
         return np.array(Image.open(gt_filename))
-
-    def substitute_names(self, pred_classes, clusters):
-        """
-        Substitute predicted class names based on cluster matching with ground truth.
-
-        Args:
-            pred_classes: List of predicted class names
-            clusters: Dictionary of cluster_id -> list of class names
-
-        Returns:
-            List of substituted class names
-        """
-        # Create a copy to avoid modifying the original
-        result = pred_classes.copy()
-
-        # For each cluster
-        for cluster_id, cluster_words in clusters.items():
-            # Find matches with ground truth classes
-            matches = set()
-            for word in cluster_words:
-                if word in self._class_names:
-                    matches.add(word)
-
-            # If exactly one unique match found
-            if len(matches) == 1:
-                matched_word = matches.pop()
-                # Replace all cluster words in predictions with the matched word
-                for word in cluster_words:
-                    for i, pred in enumerate(result):
-                        if pred == word:
-                            result[i] = matched_word
-
-        return result
-
-    def substitute_mapped_classes(self, pred_classes, mapped_classes, clusters):
-        """
-        Substitute mapped class names based on cluster matching.
-
-        Args:
-            pred_classes: List of predicted class names
-            mapped_classes: List of mapped class names
-            clusters: Dictionary of cluster_id -> list of class names
-
-        Returns:
-            List of substituted mapped classes
-        """
-        result = mapped_classes.copy()
-
-        # For each cluster
-        for cluster_id, cluster_words in clusters.items():
-            # Get corresponding mapped classes for this cluster
-            cluster_mapped_classes = set()
-            for word in cluster_words:
-                idx = pred_classes.index(word)
-                mapped_class = mapped_classes[idx]
-                if not mapped_class.startswith("unknown"):
-                    cluster_mapped_classes.add(mapped_class)
-
-            # If all non-unknown mapped classes in cluster are the same
-            if len(cluster_mapped_classes) == 1:
-                agreed_class = cluster_mapped_classes.pop()
-                # Replace mapped classes for all words in this cluster
-                for word in cluster_words:
-                    idx = pred_classes.index(word)
-                    result[idx] = agreed_class
-
-        return result
