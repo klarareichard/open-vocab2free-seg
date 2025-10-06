@@ -3,6 +3,9 @@ import os
 from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.data.datasets import load_sem_seg
 import json
+import numpy as np
+from PIL import Image
+
 
 COCO_CATEGORIES = [
     {"color": [220, 20, 60], "isthing": 1, "id": 1, "name": "person"},
@@ -205,9 +208,26 @@ def extract_image_id(file_name):
     # Return the image ID
     return int(name_without_.lstrip('0'))
 
+IGNORE_LABEL = 255
 
 def load_coco_stuff_with_attributes(image_dir, gt_dir, adjectives_file):
     dataset_dicts = load_sem_seg(image_dir, gt_dir, gt_ext="png", image_ext="jpg")
+
+    # --- Filter out images with empty or ignore-only GT ---
+    filtered_dicts = []
+    for d in dataset_dicts:
+        gt_file = d["sem_seg_file_name"]  # or wherever load_sem_seg stores the GT path
+        label = np.array(Image.open(gt_file), dtype=np.uint8)
+        if label.size == 0 or np.all(label == IGNORE_LABEL):
+            print(gt_file)
+            print("skipped")
+            continue  # skip empty / ignore-only images
+        #print(gt_file)
+        filtered_dicts.append(d)
+    dataset_dicts = filtered_dicts
+
+    # --- Load adjectives as before ---
+    import json
     with open(adjectives_file, 'r') as f:
         adjectives_data = json.load(f)
 
@@ -217,32 +237,19 @@ def load_coco_stuff_with_attributes(image_dir, gt_dir, adjectives_file):
     for data in adjectives_data:
         file_name = data["file_name"]
         image_id = extract_image_id(file_name)
-        data["image_id"] = image_id
+        adjectives[image_id] = data.get("attributes_list", [])
+        class_names[image_id] = data.get("class_names", [])
+        mapped_class_names[image_id] = data.get("mapped_class_names", None)
 
-        adjectives_dict = data['attributes_list']
-
-        class_name = data['class_names']
-
-        if "mapped_class_names" in data:
-            mapped_class_name = data['mapped_class_names']
-        else:
-            mapped_class_name = None
-
-        adjectives[image_id] = adjectives_dict
-        class_names[image_id] = class_name
-        mapped_class_names[image_id] = mapped_class_name
-
-    for dataset_dict in dataset_dicts:
-        file_name = dataset_dict["file_name"]
-        image_id = extract_image_id(file_name)
-        dataset_dict["image_id"] = image_id
-
+    # --- Attach adjective info ---
+    for d in dataset_dicts:
+        image_id = extract_image_id(d["file_name"])
+        d["image_id"] = image_id
         if image_id in adjectives:
-            dataset_dict["attributes_list"] = adjectives[image_id]
-
+            d["attributes_list"] = adjectives[image_id]
         if image_id in class_names:
-            dataset_dict["class_names"] = class_names[image_id]
-            dataset_dict["mapped_class_names"] = mapped_class_names[image_id]
+            d["class_names"] = class_names[image_id]
+            d["mapped_class_names"] = mapped_class_names[image_id]
 
     return dataset_dicts
 
@@ -258,6 +265,8 @@ def register_all_coco_stuff_10k(root):
         gt_dir = os.path.join(root, sem_seg_dirname)
 
         attributes_list_file = os.path.join(root, attributes_list_filename)
+
+        
         name = f"coco_2017_{name}_stuff_all_sem_seg"
         DatasetCatalog.register(
             name, lambda x=image_dir, y=gt_dir: load_coco_stuff_with_attributes(y, x, attributes_list_file)

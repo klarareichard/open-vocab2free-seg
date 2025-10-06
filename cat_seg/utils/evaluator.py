@@ -57,20 +57,6 @@ class VocabFreeEvaluator(DatasetEvaluator):
         # New HJI for mapped classes
         self.mapped_hji = SemanticJaccardIndex(mode="hard", classes=self._class_names,
                                                ignore_index=self._ignore_label).to(self._device)
-        
-        dataset_json = '/root/open_vocabulary_segmentation/datasets/ade150.json'
-        
-        similarity_matrix_json = 'datasets/a-150_c_ram_similarity_matrix.json'
-        # Open and load the JSON file
-        with open(similarity_matrix_json, 'r') as file:
-            similarity_matrix = json.load(file)
-        
-        self.weighted_jaccard_index = SemanticWeightedJaccardIndex(
-        dataset_json=dataset_json,
-        ignore_index=255,  # Replace with actual ignore label
-        similarity_matrix=similarity_matrix,
-        device=self._device
-    )
 
 
     def reset(self):
@@ -79,16 +65,10 @@ class VocabFreeEvaluator(DatasetEvaluator):
         self.hr.reset()
         self.sr.reset()
         self.mapped_hji.reset()
-        self.weighted_jaccard_index.reset()
 
 
     def process(self, inputs, outputs):
         # Define the path to your JSON file
-        json_file_path = '/root/open_vocabulary_segmentation/datasets/ade150.json'
-
-        # Open and load the JSON file
-        with open(json_file_path, 'r') as file:
-            classnames = json.load(file)
         for input, output in zip(inputs, outputs):
             pred_classes = input["class_names"]
             # pred_classes = [s.strip("'") for s in pred_classes.strip("[]").split(", ")]
@@ -108,7 +88,6 @@ class VocabFreeEvaluator(DatasetEvaluator):
             self.hji.update(pred, gt)
             self.hr.update(pred, gt)
             self.sr.update(pred, gt)
-            self.weighted_jaccard_index.update(pred,gt)
 
             # Update SJI based on the presence of mapped classes
             if mapped_classes:
@@ -148,8 +127,7 @@ class VocabFreeEvaluator(DatasetEvaluator):
             "HJI": hji.item() * 100,
             "SJI": mapped_hji.item() * 100, #if mapped_hji.item() != 0 else sji.item() * 100,
             "HR": hr.item() * 100,
-            "SR": sr.item() * 100,
-            "WSJI": weighted_sji * 100
+            "SR": sr.item() * 100
         }
 
         if self._output_dir:

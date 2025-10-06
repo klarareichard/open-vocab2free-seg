@@ -97,6 +97,7 @@ def add_cat_seg_config(cfg):
 
     cfg.VOCAB_FREE = False
     cfg.ALL_ADJECTIVES = False
+    cfg.ADJECTIVES = False
     cfg.CLUSTERS = False
     cfg.AGG_STRATEGY = None
     cfg.WEIGHTED_SAMPLING = False

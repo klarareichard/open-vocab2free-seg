@@ -46,6 +46,7 @@ class CATSegPredictor(nn.Module):
         attention_type: str,
         vocab_free: str = False,
         all_adjectives: str = False,
+        adjectives: str = False,
         weighted_sampling: str = False,
         agg_strategy: str = 'union',
         seed: int = 8262,
@@ -125,6 +126,7 @@ class CATSegPredictor(nn.Module):
         self.cache = None
         self.vocab_free = vocab_free
         self.all_adjectives = all_adjectives
+        self.adjectives = adjectives
         self.agg_strategy = agg_strategy
         self.weighted_sampling = weighted_sampling
 
@@ -160,6 +162,7 @@ class CATSegPredictor(nn.Module):
 
         ret["vocab_free"] = cfg.VOCAB_FREE
         ret["all_adjectives"] = cfg.ALL_ADJECTIVES
+        ret["adjectives"] = cfg.ADJECTIVES
         ret["agg_strategy"] = cfg.AGG_STRATEGY
         ret["weighted_sampling"] = cfg.WEIGHTED_SAMPLING
 
@@ -168,6 +171,8 @@ class CATSegPredictor(nn.Module):
         return ret
 
     def forward(self, x, vis_guidance, prompt=None, gt_cls=None, adjectives=None, mapped_class_names = None, predicted_class_names = None, clusters = None):
+        #if not self.adjectives: 
+        #    adjectives = None
         vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
         text = self.class_texts if self.training else self.test_class_texts
         text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt, adjectives, mapped_class_names, predicted_class_names)
@@ -268,6 +273,10 @@ class CATSegPredictor(nn.Module):
 
     def get_text_embeds(self, classnames, templates, clip_model, prompt=None, adjectives=None, mapped_class_names=None,
                         predicted_class_names=None):
+        print(adjectives)
+        #if not self.adjectives: 
+        #    adjectives = None
+        #print(adjectives)
         B = len(adjectives) if adjectives is not None else 1
 
         """
@@ -291,10 +300,10 @@ class CATSegPredictor(nn.Module):
         all_tokens = []
         for i in range(B):
             batch_tokens = []
-            adjective_weights = self.compute_all_adjective_weights(adjectives[i]) if adjectives[i] is not None and self.weighted_sampling else None
+            adjective_weights = self.compute_all_adjective_weights(adjectives[i]) if adjectives is not None and adjectives[i] is not None and self.weighted_sampling else None
             for classname in classnames:
                 adj_desc_before, adj_desc_after = None, None
-                if adjectives is not None and adjectives[i] is not None and classname in adjectives[i]:
+                if adjectives is not None and adjectives[i] is not None and classname in adjectives[i] and self.adjectives:
                     adjectives_per_class = adjectives[i][classname]
                     if adjectives_per_class:
                         if self.all_adjectives:
@@ -315,6 +324,7 @@ class CATSegPredictor(nn.Module):
                             else:
                                 adjective = random.choice(adjectives_per_class)
                             attribute_list = [adjective]
+                            print(attribute_list)
                             before_noun, after_noun = self.classify_attributes_with_spacy(attribute_list)
                             adj_desc_before = " ".join(before_noun) if before_noun else None
                             adj_desc_after = " ".join(after_noun) if after_noun else None
@@ -340,7 +350,6 @@ class CATSegPredictor(nn.Module):
                         formatted_text = f"{adj_desc_before} {formatted_text}"
                     if adj_desc_after:
                         formatted_text = f"{formatted_text} {adj_desc_after}"
-                print(formatted_text)
 
 
                 texts = [template.format(formatted_text) for template in templates]
@@ -357,7 +366,7 @@ class CATSegPredictor(nn.Module):
         else:
             tokens = all_tokens[0]
 
-        if adjectives is None:
+        if adjectives is None or B == 1:
             class_embeddings = clip_model.encode_text(tokens, prompt)
             class_embeddings = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True)
             return class_embeddings.unsqueeze(1)

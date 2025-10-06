@@ -261,7 +261,8 @@ def register_all_ade20k_full_val_all_freq(root):
     meta.update({"val_extra_classes": []})
 
     name, dirname = "val_all", "val_all"
-    predicted_class_path = "a-847_c_ramplus_a_llava.json"
+    #predicted_class_path = "a-847_c_ramplus_a_llava.json"
+    predicted_class_path = "a-847_c_ram_a_llava_m_ST.json"
     attributes_list = os.path.join(root, predicted_class_path)
     image_dir = os.path.join(root, "images_detectron2", "validation")
     gt_dir = os.path.join(root, "annotations_detectron2", "validation")

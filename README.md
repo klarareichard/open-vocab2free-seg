@@ -1,130 +1,181 @@
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/cat-seg-cost-aggregation-for-open-vocabulary/open-vocabulary-semantic-segmentation-on-2)](https://paperswithcode.com/sota/open-vocabulary-semantic-segmentation-on-2?p=cat-seg-cost-aggregation-for-open-vocabulary)<br>
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/cat-seg-cost-aggregation-for-open-vocabulary/open-vocabulary-semantic-segmentation-on-3)](https://paperswithcode.com/sota/open-vocabulary-semantic-segmentation-on-3?p=cat-seg-cost-aggregation-for-open-vocabulary)<br>
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/cat-seg-cost-aggregation-for-open-vocabulary/open-vocabulary-semantic-segmentation-on-7)](https://paperswithcode.com/sota/open-vocabulary-semantic-segmentation-on-7?p=cat-seg-cost-aggregation-for-open-vocabulary)<br>
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/cat-seg-cost-aggregation-for-open-vocabulary/open-vocabulary-semantic-segmentation-on-1)](https://paperswithcode.com/sota/open-vocabulary-semantic-segmentation-on-1?p=cat-seg-cost-aggregation-for-open-vocabulary)<br>
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/cat-seg-cost-aggregation-for-open-vocabulary/open-vocabulary-semantic-segmentation-on-5)](https://paperswithcode.com/sota/open-vocabulary-semantic-segmentation-on-5?p=cat-seg-cost-aggregation-for-open-vocabulary)
+# From Open-Vocabulary to Vocabulary-Free Semantic Segmentation
 
+![Open-Vocab2Free-Seg](images/teaser_voc-free_1.png)
 
-# CAT-Seg: Cost Aggregation for Open-Vocabulary Semantic Segmentation [CVPR 2024 Highlight]
-This is our official implementation of CAT-Seg! 
+This repository contains the **official code** for our paper:
 
-[[arXiv](https://arxiv.org/abs/2303.11797)] [[Project](https://ku-cvlab.github.io/CAT-Seg/)] [[HuggingFace Demo](https://huggingface.co/spaces/hamacojr/CAT-Seg)] [[Segment Anything with CAT-Seg](https://huggingface.co/spaces/hamacojr/SAM-CAT-Seg)]<br>
+**"From Open-Vocabulary to Vocabulary-Free Semantic Segmentation"**  
+Published in *Pattern Recognition Letters*  
+Paper link: https://www.sciencedirect.com/science/article/pii/S0167865525003101
 
-by [Seokju Cho](https://seokju-cho.github.io/)\*, [Heeseong Shin](https://github.com/hsshin98)\*, [Sunghwan Hong](https://sunghwanhong.github.io), [Anurag Arnab](https://anuragarnab.github.io), [Paul Hongsuck Seo](https://phseo.github.io), [Seungryong Kim](https://cvlab.korea.ac.kr)
+> ⚠️ Note: This code builds upon a fork of **CAT-Seg** (https://github.com/cvlab-kaist/CAT-Seg)
 
-## Introduction
-![](assets/fig1.png)
-We introduce cost aggregation to open-vocabulary semantic segmentation, which jointly aggregates both image and text modalities within the matching cost.
+------------------------------------------------------------
+Installation
+------------------------------------------------------------
 
-For further details and visualization results, please check out our [paper](https://arxiv.org/abs/2303.11797) and our [project page](https://ku-cvlab.github.io/CAT-Seg/).
+1. Clone the repository:
+   git clone git@github.com:klarareichard/open-vocab2free-seg.git
+   cd open-vocab2free-seg
 
-**❗️Update:** We released the code and pre-trained weights for CVPR version of CAT-Seg! 
-Some major updates are:
-- We now solely utilize CLIP as the pre-trained encoders, without additional backbones (ResNet, Swin)!
-- We also fine-tune the text encoder of CLIP, yielding significantly improved performance!
+2. Create the conda environment:
+   conda env create -f environment.yml
+   conda activate open-vocab2free-seg
 
-For further details, please check out our updated [paper](https://arxiv.org/abs/2303.11797).
-Note that the demos are still running on our previous version, and will be updated soon!
+------------------------------------------------------------
+Datasets
+------------------------------------------------------------
 
-## :fire:TODO
-- [x] Train/Evaluation Code (Mar 21, 2023)
-- [x] Pre-trained weights (Mar 30, 2023)
-- [x] Code of interactive demo (Jul 13, 2023)
-- [x] Release code for CVPR version (Apr 4, 2024)
-- [x] Release checkpoints for CVPR version (Apr 11, 2024)
-- [ ] Demo update
+Follow the CAT-Seg dataset setup instructions:  
+https://github.com/cvlab-kaist/CAT-Seg/blob/main/datasets/README.md
 
-## Installation
-Please follow [installation](INSTALL.md). 
+**Datasets required:**
+- Coco-Stuff
+- ADE
+- Pascal-VOC
+- Pascal-Context 59
 
-## Data Preparation
-Please follow [dataset preperation](datasets/README.md).
+For vocabulary-free segmentation, we provide **JSON files** containing predicted class names and optional adjectives for each image. Place these JSON files in the corresponding dataset folder:  
+datasets/coco/<your_json_files>.json
 
-## Demo
-If you want to try your own images locally, please try [interactive demo](https://github.com/KU-CVLAB/CAT-Seg/tree/demo).
+Download JSONs here:  
+https://drive.google.com/drive/folders/11FmjAmnTpKnMXOisu1YCnf5oS5auE4FI?usp=sharing (subfolder: json)
 
-## Training
-We provide shell scripts for training and evaluation. ```run.sh``` trains the model in default configuration and evaluates the model after training. 
+------------------------------------------------------------
+Usage
+------------------------------------------------------------
 
-To train or evaluate the model in different environments, modify the given shell script and config files accordingly.
+Set your dataset path:
+export DETECTRON2_DATASETS=/path/to/your/dataset/folder
 
-### Training script
-```bash
-sh run.sh [CONFIG] [NUM_GPUS] [OUTPUT_DIR] [OPTS]
+**Evaluation**
 
-# For ViT-B variant
-sh run.sh configs/vitb_384.yaml 4 output/
-# For ViT-L variant
-sh run.sh configs/vitl_336.yaml 4 output/
+Evaluate vocabulary-free semantic segmentation **without adjectives**:
+CUDA_VISIBLE_DEVICES=0 sh eval_ade_150.sh configs/vitb_384_vocab.yaml 1 ade_vocab_free MODEL.WEIGHTS checkpoints/cat_seg.pth
+
+**Notes:**
+- vitb_384_vocab.yaml sets VOCAB_FREE=True
+- Requires JSON file with class predictions (e.g., a-150_c_ram_a_llava_m_ST.json)
+
+**Filename structure explained:**
+- a-150: Dataset
+- c_ram: Class name tagging algorithm (RAM)
+- a_llava: Adjective generation model (LLava)
+- m_ST: Algorithm for matching predicted classes to nearest class in vocabulary (Sentence Transformers)
+
+Use adjectives: Set ADJ=True in the .yaml config. Default is ADJ=False.  
+Perfect tagger case: Use ground-truth class names with vitb_384-gt_cls.yaml.
+
+------------------------------------------------------------
+🧠 Models
+------------------------------------------------------------
+
+We provide **pretrained models** used in our paper at the following Google Drive link:  
+📂 [Pretrained Models on Google Drive](https://drive.google.com/drive/folders/1nCKz5BM--8vpBNN5PsDDpNU-Hk5DAEPf?usp=sharing)
+
+Below is an overview of which models correspond to which experiments in the paper:
+
+| **Table (Paper)** | **Model Name** | **Description** |
+|-------------------:|----------------|-----------------|
+| Table 1 & 2 | `cat_seg.pth` | CAT-Seg trained on **COCO-Stuff** |
+| Table 3 | `cat_seg_gt.pth` | CAT-Seg trained **only on ground-truth classes per image** |
+| Table 4 & 5 | `cat_seg_gt.pth` | Used for **Baseline** results |
+| Table 4 & 5 | `cat_seg_blip_ca.pth` | Used for **Captions** results |
+| Table 4 & 5 | `class_llava.pth` | Used for **Class Adjectives** results |
+| Table 4 & 5 | `llava_query_new_trained_on_perfect_attr_gt.pth` | Used for **Instance Adjectives** results |
+
+---
+
+------------------------------------------------------------
+🗂️ Class Name and Adjective JSON Files
+------------------------------------------------------------
+
+All JSON files for class names and adjectives are available in our  
+📂 [Google Drive (JSON folder)](https://drive.google.com/drive/folders/11FmjAmnTpKnMXOisu1YCnf5oS5auE4FI?usp=sharing)
+
+### 🐣 Chicken-and-Egg Experiments
+Used in **Tables 1 & 2** of the paper.
+
+**JSON file naming format:**
+```
+a-150_c_ram_a_llava_m_ST_thres_0.json
 ```
 
-## Evaluation
-```eval.sh``` automatically evaluates the model following our evaluation protocol, with weights in the output directory if not specified.
-To individually run the model in different datasets, please refer to the commands in ```eval.sh```.
-
-### Evaluation script
-```bash
-sh run.sh [CONFIG] [NUM_GPUS] [OUTPUT_DIR] [OPTS]
-
-sh eval.sh configs/vitl_336.yaml 4 output/ MODEL.WEIGHTS path/to/weights.pth
+**Available for all datasets:**
+```
+a-150, pc-59, voc-20, a-847, pc-459
 ```
 
-## Pretrained Models
-We provide pretrained weights for our models reported in the paper. All of the models were evaluated with 4 NVIDIA RTX 3090 GPUs, and can be reproduced with the evaluation script above.
+**Variants:**
+- `c_ram` → RAM tagger  
+- `c_cased` → CaSED tagger  
+- `c_tag` → TAG tagger  
 
-<table><tbody>
-<!-- START TABLE -->
-<!-- TABLE HEADER -->
-<th valign="bottom">Name</th>
-<th valign="bottom">CLIP</th>
-<th valign="bottom">A-847</th>
-<th valign="bottom">PC-459</th>
-<th valign="bottom">A-150</th>
-<th valign="bottom">PC-59</th>
-<th valign="bottom">PAS-20</th>
-<th valign="bottom">PAS-20b</th>
-<th valign="bottom">Download</th>
-<!-- TABLE BODY -->
-<!-- ROW: CAT-Seg (B) -->
-<tr>
-<td align="left">CAT-Seg (B)</a></td>
-<td align="center">ViT-B/16</td>
-<td align="center">12.0</td>
-<td align="center">19.0</td>
-<td align="center">31.8</td>
-<td align="center">57.5</td>
-<td align="center">94.6</td>
-<td align="center">77.3</td>
-<td align="center"><a href="https://huggingface.co/spaces/hamacojr/CAT-Seg-weights/resolve/main/model_base.pth">ckpt</a>&nbsp;
-</tr>
-<!-- ROW: CAT-Seg (L) -->
-<tr>
-<td align="left">CAT-Seg (L)</a></td>
-<td align="center">ViT-L/14</td>
-<td align="center">16.0</td>
-<td align="center">23.8</td>
-<td align="center">37.9</td>
-<td align="center">63.3</td>
-<td align="center">97.0</td>
-<td align="center">82.5</td>
-<td align="center"><a href="https://huggingface.co/spaces/hamacojr/CAT-Seg-weights/resolve/main/model_large.pth">ckpt</a>&nbsp;
-</tr>
+---
 
-</tbody></table>
+### ✨ Instance and Class Adjectives Experiments
+Used in **Tables 4 & 5** of the paper.
 
+**JSON file naming formats:**
+- *Instance Adjectives:*
+  ```
+  a-150_c_gt_a_llava.json
+  ```
+- *Class Adjectives:*
+  ```
+  a-150_c_gt_a_general_llava.json
+  ```
 
-## Acknowledgement
-We would like to acknowledge the contributions of public projects, such as [Zegformer](https://github.com/dingjiansw101/ZegFormer), whose code has been utilized in this repository.
-We also thank [Benedikt](mailto:benedikt.blumenstiel@student.kit.edu) for finding an error in our inference code and evaluating CAT-Seg over various datasets!
-## Citing CAT-Seg :cat::pray:
-
-```BibTeX
-@misc{cho2024catseg,
-      title={CAT-Seg: Cost Aggregation for Open-Vocabulary Semantic Segmentation}, 
-      author={Seokju Cho and Heeseong Shin and Sunghwan Hong and Anurag Arnab and Paul Hongsuck Seo and Seungryong Kim},
-      year={2024},
-      eprint={2303.11797},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV}
-}
+**Available for all datasets:**
 ```
+a-150, pc-59, voc-20, a-847, pc-459
+```
+
+
+------------------------------------------------------------
+Generating Class Names
+------------------------------------------------------------
+
+We provide all class names **JSON files** for each dataset in our Google Drive link:  
+https://drive.google.com/drive/folders/11FmjAmnTpKnMXOisu1YCnf5oS5auE4FI?usp=sharing (subfolder: json)
+
+The instructions below are only if you want to **generate the class names yourself**.
+
+Supported taggers: RAM, LLAVA, CaSED, TAG
+
+**RAM:**
+1. Clone Recognize-Anything: git@github.com:xinyu1205/recognize-anything.git
+2. Copy inference_dictionary_ram_plus.py from this repo into the Recognize-Anything folder
+3. Run:
+   python inference_dictionary_ram_plus.py --image-dir /path/to/images --output-json a-150_c_ram.json
+
+**LLAVA:**
+python llava_generate_class_names.py --dataset_short_name ade150
+
+Ensure environment variables are set:
+- DETECTRON2_DATASETS
+- DATASET_SUBDIR_GROUNDTRUTH
+- DATASET_SUBDIR_IMAGES
+
+**CaSED & TAG:**
+- CaSED: https://github.com/altndrr/vicss
+- TAG: https://github.com/Valkyrja3607/TAG
+
+Follow their repositories for dataset setup and class name generation.
+
+------------------------------------------------------------
+Generating Adjectives
+------------------------------------------------------------
+
+We provide adjectives in all JSON files. To generate with LLava:
+python llava_generate_ram_adj_retry_mechanism.py --dataset_short_name ade150
+
+Set environment variables as in Class Names Generation.
+
+------------------------------------------------------------
+Acknowledgements
+------------------------------------------------------------
+
+This project builds upon the work of **CAT-Seg: Cost Aggregation for Open-Vocabulary Semantic Segmentation**  
+(https://github.com/cvlab-kaist/CAT-Seg), which is licensed under the MIT License.  
+We thank the authors for their contributions.

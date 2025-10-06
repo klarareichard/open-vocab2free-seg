@@ -287,7 +287,7 @@ def register_ade20k_150(root):
     # VOCAB-FREE + adj: ram_predicted_class_names_ade_val_vocab_free.json
     # GT + adj: llava-1.6-gt_classes_predicted_adj_ade_val.json
     # Llava + adj: llava-1.6-predicted_classes_ade_validation_fixed.json #llava-1.6-predicted_classes_adjectives_ade_validation_fixed.json
-    predicted_class_path = "a-150_c_ram_a_llava_m_ST_cl_3e-1.json"#"filtered_output.json"# #"a-150_c_cased_m_ST_thres07.json"#"a-150_c_ram_a_llava_m_ST.json"# "filtered_output.json" #"ram_predicted_class_names_ade_val_vocab_free.json"#"llava-1.6-predicted_classes_ade_validation_right_fixed.json"#"llava-1.6-gt_classes_predicted_adj_ade_val.json" #"ram_plus_class_names_ade_only_ade_tags.json" # "ram_predicted_class_names_ade_all_tags.json"
+    predicted_class_path = "c_tag_ade-150_thres_0.json" #"a-150_c_ram_a_llava_m_ST_thres_0.json" #"llava-1.6-gt_classes_predicted_adj_ade_val.json" #"a-150_c_ram_a_llava_m_ST.json" #"a-150_c_ram_a_llava_m_ST_cl_3e-1.json"#"filtered_output.json"# #"a-150_c_cased_m_ST_thres07.json"#"a-150_c_ram_a_llava_m_ST.json"# "filtered_output.json" #"ram_predicted_class_names_ade_val_vocab_free.json"#"llava-1.6-predicted_classes_ade_validation_right_fixed.json"#"llava-1.6-gt_classes_predicted_adj_ade_val.json" #"ram_plus_class_names_ade_only_ade_tags.json" # "ram_predicted_class_names_ade_all_tags.json"
     for name, image_dirname, sem_seg_dirname, attributes_list_file in [
         ("test", "images/validation", "annotations_detectron2/validation",
             predicted_class_path),

@@ -5,7 +5,7 @@ import tqdm
 from glob import glob
 
 import numpy as np
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 COCO_CATEGORIES = [{'color': [220, 20, 60], 'isthing': 1, 'id': 0, 'name': 'person', 'trainId': 0}, 
                    {'color': [119, 11, 32], 'isthing': 1, 'id': 1, 'name': 'bicycle', 'trainId': 1}, 
@@ -181,25 +181,54 @@ COCO_CATEGORIES = [{'color': [220, 20, 60], 'isthing': 1, 'id': 0, 'name': 'pers
 
 
 if __name__ == "__main__":
+    # Path setup
     dataset_dir = Path(os.getenv("DETECTRON2_DATASETS", "datasets")) / "coco-stuff"
-
-    id_map = {}
-    for cat in COCO_CATEGORIES:
-        id_map[cat["id"]] = cat["trainId"]
+    id_map = {cat["id"]: cat["trainId"] for cat in COCO_CATEGORIES}
 
     for name in ["train2017", "val2017"]:
         annotation_dir = dataset_dir / "annotations" / name
         output_dir = dataset_dir / "annotations_detectron2" / name
         output_dir.mkdir(parents=True, exist_ok=True)
-
-        for file in tqdm.tqdm(list(annotation_dir.iterdir())):
-            output_file = output_dir / file.name
-            lab = np.asarray(Image.open(file))
-            assert lab.dtype == np.uint8
-
-            output = np.zeros_like(lab, dtype=np.uint8) + 255
-            for obj_id in np.unique(lab):
-                if obj_id in id_map:
-                    output[lab == obj_id] = id_map[obj_id]
-
-            Image.fromarray(output).save(output_file)
+        
+        bad_files = []
+        
+        # Step 1: detect corrupted files
+        for file in tqdm.tqdm(list(output_dir.iterdir())):
+            if file.suffix.lower() != ".png":
+                continue
+            try:
+                img = Image.open(file)
+                img.verify()  # only check header
+            except (UnidentifiedImageError, OSError):
+                bad_files.append(file.name)
+        
+        print(f"Found {len(bad_files)} corrupted files.")
+        
+        # Step 2: re-create only the bad files
+        for bad_file in tqdm.tqdm(bad_files, desc="Recreating"):
+            ann_file = annotation_dir / bad_file
+            out_file = output_dir / bad_file
+        
+            if not ann_file.exists():
+                print(f"Skipping {bad_file} (no source annotation found)")
+                continue
+        
+            # Delete corrupted file if it exists
+            if out_file.exists():
+                out_file.unlink()
+        
+            # Recreate
+            try:
+                lab = np.asarray(Image.open(ann_file))
+                assert lab.dtype == np.uint8
+        
+                output = np.zeros_like(lab, dtype=np.uint8) + 255
+                for obj_id in np.unique(lab):
+                    if obj_id in id_map:
+                        output[lab == obj_id] = id_map[obj_id]
+        
+                Image.fromarray(output).save(out_file)
+            except Exception as e:
+                print(f" Failed to recreate {bad_file}: {e}")
+        
+        print("Repair completed.")
