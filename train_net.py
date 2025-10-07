@@ -28,7 +28,7 @@ from detectron2.utils.logger import setup_logger
 from detectron2.engine import HookBase
 from detectron2.engine import hooks
 
-from detectron2.evaluation.sem_seg_evaluation import load_image_into_numpy_array
+#from detectron2.evaluation.sem_seg_evaluation import load_image_into_numpy_array
 
 
 from detectron2.utils.file_io import PathManager
@@ -46,6 +46,10 @@ import json
 # from mask_former.evaluation.sem_seg_evaluation_gzero import SemSegGzeroEvaluator
 
 import tempfile
+
+def load_image_into_numpy_array(path):
+    """Load an image from file into a numpy array."""
+    return np.array(Image.open(path).convert("RGB"))
 
 class SemSegGzeroEvaluator(DatasetEvaluator):
     """
@@ -359,6 +363,7 @@ class SemSegImagesEvaluator(SemSegEvaluator):
         self._output_dir = output_dir
         self._output_dir_dataset = os.path.join(output_dir, dataset_name)
         self._output_dir_dataset_gt = os.path.join(self._output_dir_dataset, 'ground_truth')
+        self.sem_seg_loading_fn = sem_seg_loading_fn
         self._output_dir_dataset_inference = os.path.join(self._output_dir_dataset, 'inference')
         #if not os.path.exists(self._output_dir_dataset):
         os.makedirs(self._output_dir_dataset, exist_ok=True)
@@ -366,7 +371,7 @@ class SemSegImagesEvaluator(SemSegEvaluator):
         os.makedirs(self._output_dir_dataset_gt, exist_ok=True)
         #if not os.path.exists(self._output_dir_dataset_inference):
 
-        super().__init__(dataset_name, True, self._output_dir_dataset_inference, sem_seg_loading_fn=sem_seg_loading_fn, num_classes=num_classes, ignore_label=ignore_label)
+        super().__init__(dataset_name, True, self._output_dir_dataset_inference, num_classes=num_classes, ignore_label=ignore_label)
         self._dataset_name = dataset_name
         meta = MetadataCatalog.get(dataset_name)
         self._class_names = meta.stuff_classes
@@ -375,6 +380,7 @@ class SemSegImagesEvaluator(SemSegEvaluator):
         # Dict that maps contiguous training ids to COCO category ids
         self._num_classes = len(meta.stuff_classes)
         self._distributed = distributed
+        
 
 
     def evaluate(self):

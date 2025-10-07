@@ -92,8 +92,8 @@ class VocabFreeEvaluator(DatasetEvaluator):
             # Update SJI based on the presence of mapped classes
             if mapped_classes:
                 self.mapped_hji.update(map_pred, gt)
-            else:
-                self.sji.update(pred, gt)
+            #else:
+            #    self.sji.update(pred, gt)
 
     def evaluate(self):
         if self._distributed:

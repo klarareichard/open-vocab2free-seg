@@ -22,6 +22,16 @@ Installation
    conda env create -f environment.yml
    conda activate open-vocab2free-seg
 
+3. Install missing dependencies:
+
+   ```bash
+   conda install pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 pytorch-cuda=11.7 -c pytorch -c nvidia
+   python -m spacy download en_core_web_sm
+   python -m spacy download en_core_web_trf
+   conda install -c conda-forge gcc_linux-64=11 gxx_linux-64=11
+   python -m pip install 'git+https://github.com/facebookresearch/detectron2.git@v0.6'
+   pip install open-clip-torch
+   ```
 ------------------------------------------------------------
 Datasets
 ------------------------------------------------------------

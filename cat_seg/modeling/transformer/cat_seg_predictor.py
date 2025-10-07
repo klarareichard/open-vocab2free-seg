@@ -353,7 +353,6 @@ class CATSegPredictor(nn.Module):
 
 
                 texts = [template.format(formatted_text) for template in templates]
-                #print(texts)
                 if self.tokenizer is not None:
                     texts = self.tokenizer(texts).cuda()
                 else:
