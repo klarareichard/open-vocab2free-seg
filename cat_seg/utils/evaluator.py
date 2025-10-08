@@ -120,7 +120,7 @@ class VocabFreeEvaluator(DatasetEvaluator):
         hr = self.hr.compute()
         sr = self.sr.compute()
         mapped_hji = self.mapped_hji.compute()
-        weighted_sji = self.weighted_jaccard_index.compute()
+        ##weighted_sji = self.weighted_jaccard_index.compute()
 
         res = OrderedDict()
         res["sem_seg"] = {

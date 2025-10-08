@@ -175,6 +175,9 @@ class CATSegPredictor(nn.Module):
         #    adjectives = None
         vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
         text = self.class_texts if self.training else self.test_class_texts
+        if self.vocab_free:
+            text = predicted_class_names[0] if not self.training else text
+            print(text)
         text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt, adjectives, mapped_class_names, predicted_class_names)
         text = text.repeat(x.shape[0], 1, 1, 1) if x.shape[0] != text.shape[0] else text
         text = text[:, gt_cls, :, :] if gt_cls is not None else text
@@ -365,7 +368,7 @@ class CATSegPredictor(nn.Module):
         else:
             tokens = all_tokens[0]
 
-        if adjectives is None or B == 1:
+        if adjectives is None:
             class_embeddings = clip_model.encode_text(tokens, prompt)
             class_embeddings = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True)
             return class_embeddings.unsqueeze(1)
